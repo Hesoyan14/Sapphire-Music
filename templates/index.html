@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sapphire</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">Sapphire</div>
+      <div class="search-wrap">
+        <input id="searchInput" type="text" placeholder="Search tracks, artists..." autocomplete="off" />
+      </div>
+      <form id="uploadForm" class="upload-form">
+        <input id="fileInput" type="file" name="file" accept=".mp3,.wav" required />
+        <button type="submit" class="upload-btn">Upload</button>
+      </form>
+    </header>
+
+    <main class="layout">
+      <aside class="panel categories-panel">
+        <nav class="categories-nav">
+          <button class="category-item is-active" type="button" data-view="main">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7z"/></svg>
+            <span>Главное</span>
+          </button>
+          <button class="category-item" type="button" data-view="playlists">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h7v6H4zm9 0h7v6h-7zM4 13h7v6H4zm9 3h7v3h-7z"/></svg>
+            <span>Плейлисты</span>
+          </button>
+        </nav>
+      </aside>
+
+      <section id="mainView" class="main-content-grid">
+        <section class="panel">
+          <h2>Library</h2>
+          <div id="tracksList" class="list"></div>
+        </section>
+
+        <aside class="panel queue-panel">
+          <h2>Queue</h2>
+          <div id="queueList" class="list"></div>
+        </aside>
+      </section>
+
+      <section id="playlistsView" class="panel playlists-view is-hidden">
+        <div class="playlists-header">
+          <h2>Мои плейлисты</h2>
+          <button id="createPlaylistBtn" class="upload-btn" type="button">+ Новый</button>
+        </div>
+        <div id="playlistsGrid" class="playlists-grid"></div>
+      </section>
+    </main>
+
+    <footer class="player-bar">
+      <div class="player-left">
+        <div class="now-playing">
+          <div id="nowTitle">No track selected</div>
+          <div id="nowArtist" class="muted">-</div>
+        </div>
+      </div>
+      <div class="controls">
+        <button id="prevBtn" class="icon-btn player-btn" title="Previous" aria-label="Previous">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 5h2v14H6zM18 6v12l-8-6z" />
+          </svg>
+        </button>
+        <button id="playPauseBtn" class="icon-btn player-btn is-play" title="Play/Pause" aria-label="Play/Pause">
+          <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 6v12l10-6z" />
+          </svg>
+          <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 6h4v12H7zM13 6h4v12h-4z" />
+          </svg>
+        </button>
+        <button id="nextBtn" class="icon-btn player-btn" title="Next" aria-label="Next">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M16 5h2v14h-2zM6 6l8 6-8 6z" />
+          </svg>
+        </button>
+      </div>
+      <div class="timeline">
+        <span id="currentTime">0:00</span>
+        <input id="seekBar" type="range" min="0" max="100" value="0" />
+        <span id="totalTime">0:00</span>
+      </div>
+      <div class="player-right">
+        <div class="volume-wrap">
+          <button id="volumeBtn" class="icon-btn player-btn" title="Volume" aria-label="Volume">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 9v6h4l5 4V5L7 9zm13 3a3 3 0 0 0-2-2.82v5.64A3 3 0 0 0 16 12z" />
+            </svg>
+          </button>
+          <div id="volumePanel" class="volume-panel" aria-hidden="true">
+            <span class="volume-label">Volume</span>
+            <input id="volumeRange" type="range" min="0" max="100" value="70" />
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <div id="trackMenu" class="track-menu is-hidden">
+      <button id="menuAddToQueue" type="button">Играть следующим</button>
+      <div class="menu-subtitle">Добавить в плейлист</div>
+      <div id="menuPlaylists" class="menu-playlists"></div>
+    </div>
+
+    <audio id="audioPlayer"></audio>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  </body>
+  </html>

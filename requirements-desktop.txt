@@ -1,0 +1,5 @@
+Flask
+mutagen
+pywebview
+waitress
+pyinstaller

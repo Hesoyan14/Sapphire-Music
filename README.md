@@ -1,7 +1,5 @@
 # Flask Music Player
 
-Dark-themed Flask music player with uploads, metadata extraction, queue, and bottom playback controls.
-
 ## Project structure
 
 - `app.py` - Flask backend and API routes

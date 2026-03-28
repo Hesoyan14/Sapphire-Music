@@ -1,6 +1,8 @@
 const tracksList = document.getElementById("tracksList");
 const queueList = document.getElementById("queueList");
 const uploadForm = document.getElementById("uploadForm");
+const themeToggleBtn = document.getElementById("themeToggleBtn");
+const uploadIconBtn = document.getElementById("uploadIconBtn");
 const fileInput = document.getElementById("fileInput");
 const audioPlayer = document.getElementById("audioPlayer");
 const playPauseBtn = document.getElementById("playPauseBtn");
@@ -17,24 +19,80 @@ const volumeRange = document.getElementById("volumeRange");
 const searchInput = document.getElementById("searchInput");
 const categoryItems = document.querySelectorAll(".category-item");
 const mainView = document.getElementById("mainView");
+const likesView = document.getElementById("likesView");
+const likesList = document.getElementById("likesList");
+const likesCountEl = document.getElementById("likesCount");
+const likesCountLabelEl = document.getElementById("likesCountLabel");
 const playlistsView = document.getElementById("playlistsView");
+const settingsView = document.getElementById("settingsView");
 const playlistsGrid = document.getElementById("playlistsGrid");
 const createPlaylistBtn = document.getElementById("createPlaylistBtn");
+const trackHighlightColorInput = document.getElementById("trackHighlightColor");
+const trackHighlightHexInput = document.getElementById("trackHighlightHex");
 const trackMenu = document.getElementById("trackMenu");
 const menuAddToQueue = document.getElementById("menuAddToQueue");
+const menuDeleteTrack = document.getElementById("menuDeleteTrack");
 const menuPlaylists = document.getElementById("menuPlaylists");
 
 let tracks = [];
 let queue = [];
 let playlists = [];
 let currentQueueIndex = -1;
+let selectedTrackId = null;
 let searchQuery = "";
 let typingTimer = null;
 let activeTrackMenuId = null;
 let currentView = "main";
 let draggedQueueItemId = null;
+const FAVORITES_KEY = "sapphire_favorites";
+const TRACK_HIGHLIGHT_KEY = "sapphire_track_highlight";
+const DEFAULT_TRACK_HIGHLIGHT = "#1db954";
+const HEART_SVG_PATH_D =
+  "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z";
+
+function favoriteHeartSvg() {
+  return `<svg class="track-favorite-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="${HEART_SVG_PATH_D}"/></svg>`;
+}
+const QUEUE_TRASH_ICON_URL = "/static/img/queue-trash.png";
 const FALLBACK_COVER =
   "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect width='100%25' height='100%25' fill='%23141414'/%3E%3Cpath d='M18 20h44v40H18z' fill='none' stroke='%23666' stroke-width='2'/%3E%3Ccircle cx='48' cy='52' r='8' fill='none' stroke='%23666' stroke-width='2'/%3E%3Cpath d='M34 30v22a7 7 0 1 0 2 5V36h14v16a7 7 0 1 0 2 5V30z' fill='%23666'/%3E%3C/svg%3E";
+
+function applyTheme(themeName) {
+  document.body.classList.toggle("theme-light", themeName === "light");
+  localStorage.setItem("sapphire_theme", themeName);
+}
+
+function normalizeTrackHighlightHex(value) {
+  if (typeof value !== "string") return DEFAULT_TRACK_HIGHLIGHT;
+  let v = value.trim().replace(/\s/g, "");
+  if (!v) return DEFAULT_TRACK_HIGHLIGHT;
+  if (!v.startsWith("#")) v = `#${v}`;
+  if (/^#[0-9A-Fa-f]{3}$/.test(v)) {
+    const r = v[1];
+    const g = v[2];
+    const b = v[3];
+    v = `#${r}${r}${g}${g}${b}${b}`;
+  }
+  if (/^#[0-9A-Fa-f]{6}$/.test(v)) return v.toLowerCase();
+  return DEFAULT_TRACK_HIGHLIGHT;
+}
+
+function applyTrackHighlight(hex) {
+  const color = normalizeTrackHighlightHex(hex);
+  document.documentElement.style.setProperty("--track-highlight-mid", color);
+  localStorage.setItem(TRACK_HIGHLIGHT_KEY, color);
+  if (trackHighlightColorInput && trackHighlightColorInput.value !== color) {
+    trackHighlightColorInput.value = color;
+  }
+  if (trackHighlightHexInput && trackHighlightHexInput.value !== color) {
+    trackHighlightHexInput.value = color;
+  }
+}
+
+function loadTrackHighlight() {
+  const stored = localStorage.getItem(TRACK_HIGHLIGHT_KEY);
+  applyTrackHighlight(stored || DEFAULT_TRACK_HIGHLIGHT);
+}
 
 function setPlayButtonState(isPlaying) {
   playPauseBtn.classList.toggle("is-pause", isPlaying);
@@ -79,12 +137,12 @@ function updateProximityGlow(clientX, clientY) {
 }
 
 function initCursorReactiveElements() {
-  document.querySelectorAll(".player-btn, .panel, .track-item, .topbar, .player-bar, #searchInput, #fileInput, .upload-btn, .category-item, .playlist-card").forEach((element) => {
+  document.querySelectorAll(".player-btn, .panel, .track-item, .topbar, .player-bar, #searchInput, #fileInput, .upload-btn, .category-item, .playlist-card, .likes-header").forEach((element) => {
     element.classList.add("cursor-reactive");
   });
 
-  // Dynamic list buttons are added after initial render.
-  document.querySelectorAll(".actions .icon-btn").forEach((element) => {
+  // Dynamic list buttons (except plain library icons: heart / settings).
+  document.querySelectorAll(".actions .icon-btn:not(.track-favorite-btn):not(.track-menu-btn):not(.queue-remove-btn)").forEach((element) => {
     element.classList.add("cursor-reactive");
   });
 }
@@ -93,12 +151,93 @@ function onUiUpdated() {
   initCursorReactiveElements();
 }
 
+function initSmoothTrackListScroll(el) {
+  if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+  let rafId = 0;
+  let targetScroll = null;
+
+  const cancelAnim = () => {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+    targetScroll = null;
+  };
+
+  el.addEventListener(
+    "wheel",
+    (e) => {
+      if (e.ctrlKey) return;
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+
+      const max = el.scrollHeight - el.clientHeight;
+      if (max <= 0) return;
+
+      e.preventDefault();
+
+      const curTop = el.scrollTop;
+      if (targetScroll === null) targetScroll = curTop;
+      targetScroll = Math.max(0, Math.min(max, targetScroll + e.deltaY));
+
+      const step = () => {
+        const cur = el.scrollTop;
+        const diff = targetScroll - cur;
+        if (Math.abs(diff) < 0.45) {
+          el.scrollTop = targetScroll;
+          cancelAnim();
+          return;
+        }
+        el.scrollTop = cur + diff * 0.2;
+        rafId = requestAnimationFrame(step);
+      };
+
+      if (!rafId) rafId = requestAnimationFrame(step);
+    },
+    { passive: false }
+  );
+}
+
 function filteredTracks() {
   if (!searchQuery) return tracks;
   return tracks.filter((track) => {
     const blob = `${track.title} ${track.artist} ${track.original_filename || ""}`.toLowerCase();
     return blob.includes(searchQuery);
   });
+}
+
+function getFavoriteIds() {
+  try {
+    const raw = localStorage.getItem(FAVORITES_KEY);
+    const parsed = JSON.parse(raw || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_e) {
+    return [];
+  }
+}
+
+function isFavoriteTrack(trackId) {
+  return getFavoriteIds().includes(trackId);
+}
+
+function toggleFavoriteTrack(trackId) {
+  const ids = getFavoriteIds();
+  const idx = ids.indexOf(trackId);
+  if (idx >= 0) ids.splice(idx, 1);
+  else ids.push(trackId);
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(ids));
+}
+
+function tracksCountWordRu(n) {
+  const abs = Math.abs(n) % 100;
+  const n1 = abs % 10;
+  if (abs >= 11 && abs <= 14) return "треков";
+  if (n1 === 1) return "трек";
+  if (n1 >= 2 && n1 <= 4) return "трека";
+  return "треков";
+}
+
+function removeTrackFromFavorites(trackId) {
+  const ids = getFavoriteIds().filter((id) => id !== trackId);
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(ids));
 }
 
 function renderTracks() {
@@ -113,25 +252,87 @@ function renderTracks() {
   visibleTracks.forEach((track) => {
     const row = document.createElement("div");
     row.className = "track-item cursor-reactive";
+    const selectedClass = selectedTrackId === track.id ? "selected-track-title" : "";
+    const fav = isFavoriteTrack(track.id);
+    const favClass = fav ? "is-favorite" : "";
     row.innerHTML = `
       <img class="track-cover" src="${track.cover_url || FALLBACK_COVER}" alt="" loading="lazy" onerror="this.src='${FALLBACK_COVER}'" />
       <div class="track-main" data-play-track="${track.id}">
-        <div class="title">${track.title}</div>
-        <div class="meta">${track.artist} • ${track.duration_label}</div>
+        <div class="track-title-line">
+          <span class="title ${selectedClass}">${track.title}</span>
+        </div>
+        <div class="track-meta-line">
+          <span class="meta">${track.artist} • ${track.duration_label}</span>
+        </div>
       </div>
       <div class="actions">
-        <button class="icon-btn cursor-reactive" data-add="${track.id}" title="Add to queue" aria-label="Add to queue">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v14h-2zM5 11h14v2H5z"></path></svg>
+        <button type="button" class="ghost icon-btn track-favorite-btn ${favClass}" data-favorite-track="${track.id}" title="${fav ? "Убрать из избранного" : "В избранное"}" aria-label="${fav ? "Убрать из избранного" : "В избранное"}" aria-pressed="${fav ? "true" : "false"}">
+          ${favoriteHeartSvg()}
         </button>
-        <button class="ghost icon-btn cursor-reactive" data-delete-track="${track.id}" title="Delete track" aria-label="Delete track">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4zm-2 6h10l-1 11H8z"></path></svg>
-        </button>
-        <button class="ghost icon-btn cursor-reactive track-menu-btn" data-menu-track="${track.id}" title="Options" aria-label="Options">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10a2 2 0 1 0 2 2 2 2 0 0 0-2-2zm6 0a2 2 0 1 0 2 2 2 2 0 0 0-2-2zm6 0a2 2 0 1 0 2 2 2 2 0 0 0-2-2z"></path></svg>
+        <button type="button" class="ghost icon-btn track-menu-btn" data-menu-track="${track.id}" title="Настройки трека" aria-label="Настройки трека">
+          <svg class="track-settings-icon" viewBox="0 0 24 24" aria-hidden="true" width="18" height="18">
+            <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M7 5v14" />
+            <circle cx="7" cy="7" r="2.5" fill="currentColor" />
+            <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14" />
+            <circle cx="12" cy="17" r="2.5" fill="currentColor" />
+            <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M17 5v14" />
+            <circle cx="17" cy="7" r="2.5" fill="currentColor" />
+          </svg>
         </button>
       </div>
     `;
     tracksList.appendChild(row);
+  });
+  onUiUpdated();
+}
+
+function renderLikes() {
+  if (!likesList || !likesCountEl) return;
+
+  const favSet = new Set(getFavoriteIds());
+  const liked = tracks.filter((track) => favSet.has(track.id));
+  likesCountEl.textContent = String(liked.length);
+  if (likesCountLabelEl) likesCountLabelEl.textContent = tracksCountWordRu(liked.length);
+
+  likesList.innerHTML = "";
+  if (!liked.length) {
+    likesList.innerHTML = `<div class="meta">Нет избранных треков. Нажмите ♥ в библиотеке.</div>`;
+    onUiUpdated();
+    return;
+  }
+
+  liked.forEach((track) => {
+    const row = document.createElement("div");
+    row.className = "track-item cursor-reactive likes-track-row";
+    const selectedClass = selectedTrackId === track.id ? "selected-track-title" : "";
+    row.innerHTML = `
+      <img class="track-cover" src="${track.cover_url || FALLBACK_COVER}" alt="" loading="lazy" onerror="this.src='${FALLBACK_COVER}'" />
+      <div class="track-main" data-play-track="${track.id}">
+        <div class="track-title-line">
+          <span class="title ${selectedClass}">${track.title}</span>
+        </div>
+        <div class="track-meta-line">
+          <span class="meta">${track.artist}</span>
+        </div>
+      </div>
+      <div class="actions likes-track-actions">
+        <span class="track-duration muted">${track.duration_label || "—"}</span>
+        <button type="button" class="ghost icon-btn track-favorite-btn is-favorite" data-favorite-track="${track.id}" title="Убрать из «Мне нравится»" aria-label="Убрать из «Мне нравится»" aria-pressed="true">
+          ${favoriteHeartSvg()}
+        </button>
+        <button type="button" class="ghost icon-btn track-menu-btn" data-menu-track="${track.id}" title="Настройки трека" aria-label="Настройки трека">
+          <svg class="track-settings-icon" viewBox="0 0 24 24" aria-hidden="true" width="18" height="18">
+            <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M7 5v14" />
+            <circle cx="7" cy="7" r="2.5" fill="currentColor" />
+            <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14" />
+            <circle cx="12" cy="17" r="2.5" fill="currentColor" />
+            <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M17 5v14" />
+            <circle cx="17" cy="7" r="2.5" fill="currentColor" />
+          </svg>
+        </button>
+      </div>
+    `;
+    likesList.appendChild(row);
   });
   onUiUpdated();
 }
@@ -149,16 +350,20 @@ function renderQueue() {
     row.className = "track-item cursor-reactive";
     row.draggable = true;
     row.dataset.queueItemId = item.queue_item_id;
-    const active = currentQueueIndex === index ? "style='color:#1DB954'" : "";
+    const selectedClass = selectedTrackId === item.id ? "selected-track-title" : "";
     row.innerHTML = `
       <img class="track-cover" src="${item.cover_url || FALLBACK_COVER}" alt="" loading="lazy" onerror="this.src='${FALLBACK_COVER}'" />
       <div class="track-main" data-play-queue="${index}">
-        <div class="title" ${active}>${item.title}</div>
-        <div class="meta">${item.artist}</div>
+        <div class="track-title-line">
+          <span class="title ${selectedClass}">${item.title}</span>
+        </div>
+        <div class="track-meta-line">
+          <span class="meta">${item.artist}</span>
+        </div>
       </div>
       <div class="actions">
-        <button class="ghost icon-btn cursor-reactive" data-remove="${item.queue_item_id}" title="Remove" aria-label="Remove">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12v2H6zm2 3h8l-1 9H9zm2-5h4l1 1h4v2H5V6h4z"></path></svg>
+        <button type="button" class="ghost icon-btn queue-remove-btn" data-remove="${item.queue_item_id}" title="Убрать из очереди" aria-label="Убрать из очереди">
+          <img class="queue-trash-img" src="${QUEUE_TRASH_ICON_URL}" width="18" height="18" alt="" draggable="false" />
         </button>
       </div>
     `;
@@ -236,10 +441,22 @@ function formatTime(seconds) {
   return `${minutes}:${String(remainder).padStart(2, "0")}`;
 }
 
+function syncSeekBarGradientPct() {
+  const max = Number(seekBar.max);
+  const val = Number(seekBar.value);
+  if (!Number.isFinite(max) || max <= 0) {
+    seekBar.style.setProperty("--seek-pct", "0");
+    return;
+  }
+  const pct = Math.min(100, Math.max(0, (val / max) * 100));
+  seekBar.style.setProperty("--seek-pct", pct.toFixed(2));
+}
+
 async function fetchTracks() {
   const response = await fetch("/tracks");
   tracks = await response.json();
   renderTracks();
+  renderLikes();
 }
 
 async function fetchQueue() {
@@ -295,6 +512,7 @@ async function deleteTrack(trackId) {
     audioPlayer.removeAttribute("src");
     audioPlayer.load();
     currentQueueIndex = -1;
+    selectedTrackId = null;
     setNowPlaying(null);
     setPlayButtonState(false);
   }
@@ -302,6 +520,7 @@ async function deleteTrack(trackId) {
   queue = payload.queue || [];
   playlists = payload.playlists || playlists;
   localStorage.setItem("music_queue", JSON.stringify(queue));
+  removeTrackFromFavorites(trackId);
   await fetchTracks();
   renderQueue();
   renderPlaylists();
@@ -377,7 +596,39 @@ async function openPlaylist(playlist) {
   queue = await response.json();
   localStorage.setItem("music_queue", JSON.stringify(queue));
   renderQueue();
-  setView("main");
+  setView("main", { behavior: "smooth" });
+}
+
+function getLikedTracksOrdered() {
+  const favSet = new Set(getFavoriteIds());
+  return tracks.filter((track) => favSet.has(track.id));
+}
+
+async function replaceQueueWithLikedTracksAndPlay(trackId) {
+  const liked = getLikedTracksOrdered();
+  const idx = liked.findIndex((t) => t.id === trackId);
+  if (idx < 0) return;
+
+  const preparedQueue = liked.map((track) => ({
+    ...track,
+    queue_item_id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`,
+  }));
+
+  const response = await fetch("/queue", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "replace", queue: preparedQueue }),
+  });
+
+  if (!response.ok) {
+    alert("Не удалось запустить очередь из избранного.");
+    return;
+  }
+
+  queue = await response.json();
+  localStorage.setItem("music_queue", JSON.stringify(queue));
+  renderQueue();
+  playQueueIndex(idx);
 }
 
 function renderTrackMenu(trackId) {
@@ -413,12 +664,164 @@ function hideTrackMenu() {
   activeTrackMenuId = null;
 }
 
-function setView(viewName) {
+/** Соответствует `scroll-padding-top` в CSS (шапка). */
+const SECTION_SCROLL_PADDING_TOP = 72;
+
+/** Гистерезис переключения пункта в панели (пиксели за границей секции). */
+const SECTION_TAB_HYSTERESIS_PX = 96;
+
+let viewScrollSyncSuppress = false;
+let viewScrollSuppressTimer = null;
+let sectionScrollRafId = 0;
+
+function getViewportScrollTop() {
+  return window.scrollY ?? window.pageYOffset ?? document.documentElement.scrollTop ?? 0;
+}
+
+function setViewportScrollTop(y) {
+  window.scrollTo({ top: y, left: 0, behavior: "auto" });
+}
+
+function getScrollMaxY() {
+  const se = document.scrollingElement || document.documentElement;
+  return Math.max(0, se.scrollHeight - window.innerHeight);
+}
+
+function suppressViewScrollSync(ms) {
+  viewScrollSyncSuppress = true;
+  clearTimeout(viewScrollSuppressTimer);
+  viewScrollSuppressTimer = setTimeout(() => {
+    viewScrollSyncSuppress = false;
+  }, ms);
+}
+
+function getModuleTargetScrollTop(el) {
+  const rect = el.getBoundingClientRect();
+  return getViewportScrollTop() + rect.top - SECTION_SCROLL_PADDING_TOP;
+}
+
+function cancelSectionScrollAnim() {
+  if (sectionScrollRafId) {
+    cancelAnimationFrame(sectionScrollRafId);
+    sectionScrollRafId = 0;
+  }
+}
+
+/**
+ * Плавная прокрутка документа от текущей позиции (обходит конфликт scroll-snap + WebView).
+ */
+function scrollRootSmoothTo(targetTop, durationMs, behavior) {
+  const maxTop = getScrollMaxY();
+  const top = Math.max(0, Math.min(targetTop, maxTop));
+  const html = document.documentElement;
+
+  if (behavior === "auto") {
+    cancelSectionScrollAnim();
+    html.style.scrollSnapType = "none";
+    setViewportScrollTop(top);
+    html.style.scrollSnapType = "";
+    return;
+  }
+
+  cancelSectionScrollAnim();
+  html.style.scrollSnapType = "none";
+
+  const start = getViewportScrollTop();
+  const dist = top - start;
+  if (Math.abs(dist) < 1) {
+    html.style.scrollSnapType = "";
+    return;
+  }
+
+  const t0 = performance.now();
+
+  function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  function frame(now) {
+    const t = Math.min(1, (now - t0) / durationMs);
+    setViewportScrollTop(start + dist * easeOutCubic(t));
+    if (t < 1) {
+      sectionScrollRafId = requestAnimationFrame(frame);
+    } else {
+      setViewportScrollTop(top);
+      sectionScrollRafId = 0;
+      html.style.scrollSnapType = "";
+    }
+  }
+
+  sectionScrollRafId = requestAnimationFrame(frame);
+}
+
+function scrollPageToView(viewName, behavior) {
+  let el = mainView;
+  if (viewName === "likes") el = likesView;
+  else if (viewName === "playlists") el = playlistsView;
+  else if (viewName === "settings") el = settingsView;
+  if (!el) return;
+  const target = getModuleTargetScrollTop(el);
+  scrollRootSmoothTo(target, 520, behavior);
+}
+
+function getModuleDocumentTop(el) {
+  return el.getBoundingClientRect().top + getViewportScrollTop();
+}
+
+function getSectionScrollAnchorTops() {
+  return {
+    main: getModuleDocumentTop(mainView),
+    likes: getModuleDocumentTop(likesView),
+    playlists: getModuleDocumentTop(playlistsView),
+    settings: getModuleDocumentTop(settingsView),
+  };
+}
+
+function syncCategoryFromPageScroll() {
+  if (viewScrollSyncSuppress || !mainView || !likesView || !playlistsView || !settingsView) return;
+  const y = getViewportScrollTop();
+  const anchor = y + window.innerHeight * 0.36;
+  const t = getSectionScrollAnchorTops();
+  const B1 = (t.main + t.likes) / 2;
+  const B2 = (t.likes + t.playlists) / 2;
+  const B3 = (t.playlists + t.settings) / 2;
+  const h = SECTION_TAB_HYSTERESIS_PX;
+
+  let next = currentView;
+  if (currentView === "main") {
+    if (anchor > B3 + h) next = "settings";
+    else if (anchor > B2 + h) next = "playlists";
+    else if (anchor > B1 + h) next = "likes";
+  } else if (currentView === "likes") {
+    if (anchor < B1 - h) next = "main";
+    else if (anchor > B3 + h) next = "settings";
+    else if (anchor > B2 + h) next = "playlists";
+  } else if (currentView === "playlists") {
+    if (anchor < B1 - h) next = "main";
+    else if (anchor < B2 - h) next = "likes";
+    else if (anchor > B3 + h) next = "settings";
+  } else if (currentView === "settings") {
+    if (anchor < B1 - h) next = "main";
+    else if (anchor < B2 - h) next = "likes";
+    else if (anchor < B3 - h) next = "playlists";
+  }
+
+  if (next !== currentView) {
+    currentView = next;
+    categoryItems.forEach((item) => item.classList.toggle("is-active", item.dataset.view === next));
+  }
+}
+
+function setView(viewName, options = {}) {
+  const { scroll = true, behavior = "smooth" } = options;
   currentView = viewName;
   categoryItems.forEach((item) => item.classList.toggle("is-active", item.dataset.view === viewName));
-  const showPlaylists = viewName === "playlists";
-  mainView.classList.toggle("is-hidden", showPlaylists);
-  playlistsView.classList.toggle("is-hidden", !showPlaylists);
+
+  if (scroll && mainView && likesView && playlistsView && settingsView) {
+    const ms = behavior === "auto" ? 120 : 650;
+    suppressViewScrollSync(ms);
+    requestAnimationFrame(() => scrollPageToView(viewName, behavior));
+  }
 }
 
 function setNowPlaying(track) {
@@ -430,11 +833,14 @@ function playQueueIndex(index) {
   if (!queue.length || index < 0 || index >= queue.length) return;
   currentQueueIndex = index;
   const track = queue[index];
+  selectedTrackId = track.id;
   audioPlayer.src = track.audio_url;
   audioPlayer.play();
   setPlayButtonState(true);
   setNowPlaying(track);
   renderQueue();
+  renderTracks();
+  renderLikes();
 }
 
 function playNext() {
@@ -444,8 +850,11 @@ function playNext() {
     playQueueIndex(nextIndex);
   } else {
     currentQueueIndex = -1;
+    selectedTrackId = null;
     setPlayButtonState(false);
     setNowPlaying(null);
+    renderTracks();
+    renderLikes();
   }
 }
 
@@ -478,6 +887,21 @@ uploadForm.addEventListener("submit", async (event) => {
   await fetchTracks();
 });
 
+uploadIconBtn.addEventListener("click", () => {
+  fileInput.click();
+});
+
+fileInput.addEventListener("change", () => {
+  if (fileInput.files && fileInput.files[0]) {
+    uploadForm.requestSubmit();
+  }
+});
+
+themeToggleBtn.addEventListener("click", () => {
+  const nextTheme = document.body.classList.contains("theme-light") ? "dark" : "light";
+  applyTheme(nextTheme);
+});
+
 searchInput.addEventListener("input", () => {
   searchQuery = searchInput.value.trim().toLowerCase();
   searchInput.classList.add("is-typing");
@@ -501,16 +925,51 @@ tracksList.addEventListener("click", (event) => {
     return;
   }
 
-  const button = event.target.closest("button");
-  if (!button) return;
-  const addId = button.getAttribute("data-add");
-  const deleteId = button.getAttribute("data-delete-track");
-  const menuTrackId = button.getAttribute("data-menu-track");
-  if (addId) addToQueue(addId);
-  if (deleteId) {
-    deleteTrack(deleteId);
+  const favBtn = event.target.closest("[data-favorite-track]");
+  if (favBtn) {
+    event.stopPropagation();
+    const fid = favBtn.getAttribute("data-favorite-track");
+    toggleFavoriteTrack(fid);
+    const on = isFavoriteTrack(fid);
+    favBtn.classList.toggle("is-favorite", on);
+    favBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    favBtn.setAttribute("aria-label", on ? "Убрать из избранного" : "В избранное");
+    favBtn.title = on ? "Убрать из избранного" : "В избранное";
+    renderLikes();
     return;
   }
+
+  const button = event.target.closest("button");
+  if (!button) return;
+  const menuTrackId = button.getAttribute("data-menu-track");
+  if (menuTrackId) {
+    event.stopPropagation();
+    showTrackMenu(menuTrackId, button);
+    return;
+  }
+});
+
+likesList.addEventListener("click", (event) => {
+  const trackMain = event.target.closest("[data-play-track]");
+  if (trackMain) {
+    const trackId = trackMain.getAttribute("data-play-track");
+    void replaceQueueWithLikedTracksAndPlay(trackId);
+    return;
+  }
+
+  const favBtn = event.target.closest("[data-favorite-track]");
+  if (favBtn) {
+    event.stopPropagation();
+    const fid = favBtn.getAttribute("data-favorite-track");
+    toggleFavoriteTrack(fid);
+    renderTracks();
+    renderLikes();
+    return;
+  }
+
+  const button = event.target.closest("button");
+  if (!button) return;
+  const menuTrackId = button.getAttribute("data-menu-track");
   if (menuTrackId) {
     event.stopPropagation();
     showTrackMenu(menuTrackId, button);
@@ -614,11 +1073,32 @@ menuAddToQueue.addEventListener("click", () => {
   hideTrackMenu();
 });
 
+menuDeleteTrack.addEventListener("click", () => {
+  if (!activeTrackMenuId) return;
+  if (!window.confirm("Удалить этот трек из библиотеки?")) return;
+  const id = activeTrackMenuId;
+  hideTrackMenu();
+  deleteTrack(id);
+});
+
 categoryItems.forEach((item) => {
   item.addEventListener("click", () => {
     const view = item.dataset.view || "main";
-    setView(view);
+    setView(view, { behavior: "smooth" });
   });
+});
+
+window.addEventListener(
+  "scroll",
+  () => {
+    requestAnimationFrame(syncCategoryFromPageScroll);
+  },
+  { passive: true }
+);
+
+window.addEventListener("scrollend", () => {
+  viewScrollSyncSuppress = false;
+  syncCategoryFromPageScroll();
 });
 
 createPlaylistBtn.addEventListener("click", createPlaylist);
@@ -636,15 +1116,18 @@ prevBtn.addEventListener("click", playPrevious);
 audioPlayer.addEventListener("loadedmetadata", () => {
   seekBar.max = Math.floor(audioPlayer.duration || 0);
   totalTime.textContent = formatTime(audioPlayer.duration || 0);
+  syncSeekBarGradientPct();
 });
 
 audioPlayer.addEventListener("timeupdate", () => {
   seekBar.value = Math.floor(audioPlayer.currentTime || 0);
   currentTime.textContent = formatTime(audioPlayer.currentTime || 0);
+  syncSeekBarGradientPct();
 });
 
 seekBar.addEventListener("input", () => {
   audioPlayer.currentTime = Number(seekBar.value);
+  syncSeekBarGradientPct();
 });
 
 audioPlayer.addEventListener("ended", () => {
@@ -654,7 +1137,23 @@ audioPlayer.addEventListener("ended", () => {
 audioPlayer.addEventListener("play", () => setPlayButtonState(true));
 audioPlayer.addEventListener("pause", () => setPlayButtonState(false));
 
+if (trackHighlightColorInput) {
+  trackHighlightColorInput.addEventListener("input", () => {
+    applyTrackHighlight(trackHighlightColorInput.value);
+  });
+}
+if (trackHighlightHexInput) {
+  trackHighlightHexInput.addEventListener("change", () => {
+    applyTrackHighlight(trackHighlightHexInput.value);
+  });
+  trackHighlightHexInput.addEventListener("blur", () => {
+    applyTrackHighlight(trackHighlightHexInput.value);
+  });
+}
+
 window.addEventListener("DOMContentLoaded", async () => {
+  applyTheme(localStorage.getItem("sapphire_theme") || "dark");
+  loadTrackHighlight();
   await fetchTracks();
   await fetchQueue();
   await fetchPlaylists();
@@ -676,8 +1175,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   }
   setPlayButtonState(false);
-  updateVolume(70);
-  setView("main");
+  updateVolume(30);
+  syncSeekBarGradientPct();
+  setView("main", { scroll: false });
+  initSmoothTrackListScroll(tracksList);
+  initSmoothTrackListScroll(queueList);
+  initSmoothTrackListScroll(likesList);
 });
 
 window.addEventListener("mousemove", (event) => {

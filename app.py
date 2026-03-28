@@ -3,6 +3,7 @@ import uuid
 from urllib.parse import quote_plus
 from urllib.request import urlopen
 import json
+import base64
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_from_directory, url_for
@@ -54,7 +55,6 @@ def format_duration(seconds: float) -> str:
     remainder = total % 60
     return f"{minutes}:{remainder:02d}"
 
-
 def parse_filename_metadata(original_name: str):
     stem = Path(original_name).stem
     if " - " in stem:
@@ -90,17 +90,25 @@ def pick_tag(tags, keys, default=""):
 
 
 def fetch_cover_url(artist: str, title: str):
-    search_term = quote_plus(f"{artist} {title}".strip())
-    if not search_term:
-        return ""
-    try:
-        with urlopen(f"https://itunes.apple.com/search?term={search_term}&entity=song&limit=1", timeout=4) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-            results = payload.get("results", [])
-            if results:
-                return results[0].get("artworkUrl100", "").replace("100x100bb", "300x300bb")
-    except Exception:
-        return ""
+    artist_text = str(artist or "").strip()
+    title_text = str(title or "").strip()
+    terms = [
+        f"{artist_text} {title_text}".strip(),
+        title_text,
+        artist_text,
+    ]
+    for term in terms:
+        if not term:
+            continue
+        try:
+            search_term = quote_plus(term)
+            with urlopen(f"https://itunes.apple.com/search?term={search_term}&entity=song&limit=1", timeout=0.6) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+                results = payload.get("results", [])
+                if results:
+                    return results[0].get("artworkUrl100", "").replace("100x100bb", "300x300bb")
+        except Exception:
+            continue
     return ""
 
 
@@ -129,6 +137,55 @@ def extract_track_metadata(filepath: Path, original_name: str):
         "artist": artist.strip() or fallback_artist or "Unknown artist",
         "duration": duration,
     }
+
+
+def extract_embedded_cover_data_url(filepath: Path) -> str:
+    try:
+        audio = MutagenFile(filepath)
+    except Exception:
+        return ""
+
+    if audio is None:
+        return ""
+
+    tags = getattr(audio, "tags", None)
+    if not tags:
+        return ""
+
+    candidates = []
+    if hasattr(tags, "keys"):
+        for key in tags.keys():
+            key_str = str(key)
+            if key_str.startswith("APIC") or key_str.lower() == "covr":
+                value = tags.get(key)
+                if value is not None:
+                    candidates.append(value)
+
+    for item in candidates:
+        mime = "image/jpeg"
+        raw = b""
+
+        # MP3/ID3 APIC
+        if hasattr(item, "data"):
+            raw = getattr(item, "data", b"") or b""
+            mime = str(getattr(item, "mime", mime) or mime)
+        # MP4 covr can be list/tuple of bytes
+        elif isinstance(item, (list, tuple)) and item:
+            first = item[0]
+            if isinstance(first, bytes):
+                raw = first
+                mime = "image/jpeg"
+        elif isinstance(item, bytes):
+            raw = item
+            mime = "image/jpeg"
+
+        if not raw:
+            continue
+
+        encoded = base64.b64encode(raw).decode("ascii")
+        return f"data:{mime};base64,{encoded}"
+
+    return ""
 
 
 def get_tracks():
@@ -169,7 +226,47 @@ def index():
 
 @app.route("/tracks", methods=["GET"])
 def tracks():
-    return jsonify(get_tracks())
+    tracks_data = get_tracks()
+    if not isinstance(tracks_data, list):
+        return jsonify([])
+
+    changed = False
+    cover_attempts = 0
+    max_cover_attempts = 1
+    for item in tracks_data:
+        if not isinstance(item, dict):
+            continue
+
+        title = str(item.get("title") or Path(str(item.get("original_filename") or "track")).stem).strip()
+        artist = str(item.get("artist") or "Unknown artist").strip()
+
+        if item.get("title") != title:
+            item["title"] = title
+            changed = True
+        if item.get("artist") != artist:
+            item["artist"] = artist
+            changed = True
+
+        if not item.get("cover_url"):
+            filename = str(item.get("filename") or "")
+            file_path = UPLOAD_DIR / filename if filename else None
+            local_cover = extract_embedded_cover_data_url(file_path) if file_path and file_path.exists() else ""
+            if local_cover:
+                item["cover_url"] = local_cover
+                changed = True
+                continue
+
+            if cover_attempts < max_cover_attempts:
+                cover_attempts += 1
+                cover = fetch_cover_url(artist, title)
+                if cover:
+                    item["cover_url"] = cover
+                    changed = True
+
+    if changed:
+        save_tracks(tracks_data)
+
+    return jsonify(tracks_data)
 
 
 @app.route("/tracks/<track_id>", methods=["DELETE"])
@@ -219,6 +316,7 @@ def upload():
     music_file.save(target_path)
 
     metadata = extract_track_metadata(target_path, cleaned_name)
+    local_cover = extract_embedded_cover_data_url(target_path)
     track_id = uuid.uuid4().hex
     track_payload = {
         "id": track_id,
@@ -230,7 +328,7 @@ def upload():
         "duration_label": format_duration(metadata["duration"]),
         "audio_url": url_for("audio", filename=unique_name),
         "search_hint": quote_plus(f"{metadata['artist']} {metadata['title']}"),
-        "cover_url": fetch_cover_url(metadata["artist"], metadata["title"]),
+        "cover_url": local_cover or fetch_cover_url(metadata["artist"], metadata["title"]),
     }
 
     tracks_data = get_tracks()

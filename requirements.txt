@@ -1,2 +1,7 @@
-Flask
+requests>=2.28
+Flask>=3.0
+Flask-SQLAlchemy>=3.1
 mutagen
+Werkzeug>=3.0
+psycopg2-binary>=2.9
+boto3>=1.34

@@ -48,6 +48,12 @@ Result:
 
 - `dist/Sapphire/Sapphire.exe`
 
+## Deploy as a public website (not only localhost)
+
+Sapphire can run behind HTTPS on a VPS (Linux) with PostgreSQL, optional S3 storage, and gunicorn. See **`docs/ДЕПЛОЙ-В-ИНТЕРНЕТЕ-RU.md`** (Russian). Production deps: `pip install -r requirements-prod.txt`, then e.g. `gunicorn -w 4 -b 127.0.0.1:8000 wsgi:app` behind Caddy/nginx.
+
+Set `FLASK_SECRET_KEY`, `SESSION_COOKIE_SECURE=true`, and `SAPPHIRE_BEHIND_PROXY=true` when using a reverse proxy.
+
 ## Notes
 
 - Allowed uploads: `.mp3`, `.wav`

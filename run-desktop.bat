@@ -5,7 +5,6 @@ cd /d "%~dp0"
 
 set "VENV_DIR=.venv312"
 set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
-set "PIP_MARKER=%VENV_DIR%\.deps_installed"
 
 echo [Sapphire] Preparing desktop environment...
 call :ensure_python_312
@@ -24,26 +23,24 @@ if not exist "%VENV_PY%" (
   )
 )
 
-if not exist "%PIP_MARKER%" (
-  echo [2/4] Upgrading pip...
+echo [2/4] Verifying dependencies...
+"%VENV_PY%" -c "import requests, flask, flask_sqlalchemy, mutagen, psycopg2, boto3, webview, waitress" >nul 2>nul
+if errorlevel 1 (
+  echo [3/4] Installing desktop dependencies...
   "%VENV_PY%" -m pip install --upgrade pip
   if errorlevel 1 (
     echo [ERROR] Failed to upgrade pip.
     pause
     exit /b 1
   )
-
-  echo [3/4] Installing desktop dependencies...
   "%VENV_PY%" -m pip install -r requirements-desktop.txt
   if errorlevel 1 (
     echo [ERROR] Failed to install desktop dependencies.
     pause
     exit /b 1
   )
-
-  type nul > "%PIP_MARKER%"
 ) else (
-  echo [2/4] Dependencies already installed.
+  echo [3/4] Dependencies are ready.
 )
 
 echo [4/4] Starting desktop app...

@@ -86,7 +86,7 @@
         <span class="search-icon" aria-hidden="true">
           <img src="{{ url_for('static', filename='img/search-icon.png') }}" alt="" width="20" height="20" />
         </span>
-        <input id="searchInput" type="text" placeholder="Найдите трек, артиста..." autocomplete="off" aria-label="Найдите трек, артиста" />
+        <input id="searchInput" type="text" placeholder="Найдите трек в медиатеке..." autocomplete="off" aria-label="Поиск в медиатеке" />
       </div>
       <form id="uploadForm" class="upload-form">
         <input id="fileInput" class="file-input-hidden" type="file" name="file" accept=".mp3,.wav" />
@@ -267,17 +267,6 @@
             <span class="settings-checkbox-caption">Включено</span>
           </label>
         </div>
-        <div class="settings-control-row" role="group" aria-labelledby="topbarGlowLabel">
-          <div class="settings-control-text">
-            <span id="topbarGlowLabel" class="settings-label-primary">Свечение верхней панели</span>
-            <span class="meta settings-label-hint"
-              >Мягкое радиальное свечение под панелью с поиском (отдельно от линии сверху).</span>
-          </div>
-          <label class="settings-checkbox-control">
-            <input id="topbarGlowToggle" type="checkbox" checked />
-            <span class="settings-checkbox-caption">Включено</span>
-          </label>
-        </div>
         <div class="settings-control-row" role="group" aria-labelledby="topbarOutlineLabel">
           <div class="settings-control-text">
             <span id="topbarOutlineLabel" class="settings-label-primary">Обводка верхней панели</span>
@@ -289,18 +278,7 @@
             <span class="settings-checkbox-caption">Включено</span>
           </label>
         </div>
-        <div class="settings-control-row" role="group" aria-labelledby="trackBeatGlowLabel">
-          <div class="settings-control-text">
-            <span id="trackBeatGlowLabel" class="settings-label-primary">Подсветка ритма в списках</span>
-            <span class="meta settings-label-hint"
-              >Свечение поверх фона панелей со списками треков, но под строками треков; ритм и громкость (анализ в браузере).</span>
-          </div>
-          <label class="settings-checkbox-control">
-            <input id="trackBeatGlowToggle" type="checkbox" checked />
-            <span class="settings-checkbox-caption">Включено</span>
-          </label>
-        </div>
-        <div class="settings-control-row" role="group" aria-labelledby="logoutLabel">
+        <div class="settings-control-row settings-control-row-full" role="group" aria-labelledby="logoutLabel">
           <div class="settings-control-text">
             <span id="logoutLabel" class="settings-label-primary">Сессия</span>
             <span class="meta settings-label-hint">Выйти из приложения на этом устройстве.</span>
@@ -332,6 +310,10 @@
     </div>
 
     <footer class="player-bar">
+      <div id="playerProgressLine" class="player-progress-line" aria-label="Прогресс трека">
+        <div id="playerProgressFill" class="player-progress-fill"></div>
+        <div id="playerProgressHint" class="player-progress-hint">0:00</div>
+      </div>
       <div class="player-left">
         <div class="now-playing">
           <div id="nowTitle">No track selected</div>
@@ -340,6 +322,16 @@
       </div>
       <div class="player-center">
         <div class="controls">
+          <button
+            type="button"
+            id="shuffleBtn"
+            class="icon-btn player-btn player-mode-btn"
+            title="Случайный следующий трек"
+            aria-label="Случайный следующий трек"
+            aria-pressed="false"
+          >
+            <img src="{{ url_for('static', filename='img/player-shuffle.png') }}" alt="" width="22" height="22" draggable="false" />
+          </button>
           <button id="prevBtn" class="icon-btn player-btn" title="Previous" aria-label="Previous">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M6 5h2v14H6zM18 6v12l-8-6z" />
@@ -358,15 +350,25 @@
               <path d="M16 5h2v14h-2zM6 6l8 6-8 6z" />
             </svg>
           </button>
-        </div>
-        <div class="timeline">
-          <span id="currentTime">0:00</span>
-          <input id="seekBar" type="range" min="0" max="100" value="0" />
-          <span id="totalTime">0:00</span>
+          <button
+            type="button"
+            id="repeatBtn"
+            class="icon-btn player-btn player-mode-btn"
+            title="Повтор очереди"
+            aria-label="Повтор очереди"
+            aria-pressed="false"
+          >
+            <img src="{{ url_for('static', filename='img/player-repeat.png') }}" alt="" width="22" height="22" draggable="false" />
+          </button>
         </div>
       </div>
       <div class="player-right">
         <div class="volume-wrap">
+          <button id="eqBtn" class="icon-btn player-btn" title="Эквалайзер" aria-label="Эквалайзер">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 4h2v16H5zm6 4h2v12h-2zm6-3h2v15h-2z" />
+            </svg>
+          </button>
           <button id="volumeBtn" class="icon-btn player-btn" title="Volume" aria-label="Volume">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M3 9v6h4l5 4V5L7 9zm13 3a3 3 0 0 0-2-2.82v5.64A3 3 0 0 0 16 12z" />
@@ -379,6 +381,37 @@
         </div>
       </div>
     </footer>
+
+    <div id="eqModal" class="track-details-modal is-hidden" aria-hidden="true">
+      <button type="button" class="track-details-backdrop" id="eqBackdrop" tabindex="-1" aria-label="Закрыть"></button>
+      <div class="track-details-dialog eq-dialog" role="dialog" aria-modal="true" aria-labelledby="eqTitle">
+        <div class="track-details-dialog-head">
+          <h2 id="eqTitle" class="track-details-title">Эквалайзер</h2>
+          <button type="button" class="track-details-close" id="eqClose" aria-label="Закрыть">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path fill="currentColor" d="M18.3 5.71L12.66 11.35l5.65 5.65-1.41 1.41-5.65-5.65-5.65 5.65-1.41-1.41 5.65-5.65-5.65-5.65 1.41-1.41 5.65 5.65 5.65-5.65z" />
+            </svg>
+          </button>
+        </div>
+        <div class="track-details-body eq-body">
+          <div class="eq-top-row">
+            <label class="eq-preset-wrap">Предустановка
+              <select id="eqPresetSelect" class="eq-preset-select">
+                <option value="custom">Настраиваемое</option>
+                <option value="flat">Flat</option>
+                <option value="bass">Bass boost</option>
+                <option value="vocal">Vocal</option>
+              </select>
+            </label>
+            <label class="settings-checkbox-control">
+              <input id="eqEnabledToggle" type="checkbox" checked />
+              <span class="settings-checkbox-caption">Вкл.</span>
+            </label>
+          </div>
+          <div id="eqBands" class="eq-bands"></div>
+        </div>
+      </div>
+    </div>
 
     <div id="trackDetailsModal" class="track-details-modal is-hidden" aria-hidden="true">
       <button type="button" class="track-details-backdrop" id="trackDetailsBackdrop" tabindex="-1" aria-label="Закрыть"></button>

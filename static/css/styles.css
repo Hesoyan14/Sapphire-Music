@@ -62,6 +62,57 @@ body {
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
+body::before,
+body::after {
+  display: none;
+}
+
+body::before {
+  width: 38vw;
+  height: 38vw;
+  min-width: 240px;
+  min-height: 240px;
+  top: -12vw;
+  right: -10vw;
+  background: color-mix(in srgb, var(--track-highlight-mid) 42%, #9fd4ff);
+  animation: auroraFloatA 18s ease-in-out infinite alternate;
+}
+
+body::after {
+  width: 34vw;
+  height: 34vw;
+  min-width: 210px;
+  min-height: 210px;
+  bottom: -12vw;
+  left: -9vw;
+  background: color-mix(in srgb, var(--track-highlight-mid) 34%, #ffffff);
+  animation: auroraFloatB 22s ease-in-out infinite alternate;
+}
+
+body.is-scrolling::before,
+body.is-scrolling::after {
+  animation-play-state: paused;
+  opacity: 0.12;
+}
+
+@keyframes auroraFloatA {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(-2vw, 2.5vw, 0) scale(1.08);
+  }
+}
+
+@keyframes auroraFloatB {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(2vw, -2.2vw, 0) scale(1.06);
+  }
+}
+
 /* Подсветка ритма: над заливкой панели, под заголовком и строками треков (--app-beat-glow-opacity из JS) */
 .beat-glow-beneath-tracks {
   position: relative;
@@ -70,42 +121,41 @@ body {
 .beat-glow-beneath-tracks::before {
   content: "";
   position: absolute;
-  left: -6%;
-  right: -6%;
-  top: 18%;
-  bottom: 24%;
+  left: -7%;
+  right: -7%;
+  top: 14%;
+  bottom: 22%;
   border-radius: inherit;
   z-index: 0;
   pointer-events: none;
   opacity: var(--app-beat-glow-opacity, 0);
-  transform-origin: 50% 52%;
-  transform: scaleX(var(--app-beat-glow-wave-scale, 1));
+  transform-origin: 50% 62%;
+  transform: scaleX(var(--app-beat-glow-wave-scale, 1)) translateY(var(--app-beat-glow-translate-y, 0%));
   background:
-    /* Волна ближе к центру панели */
     radial-gradient(
-      ellipse 165% 78% at 50% 58%,
-      color-mix(in srgb, var(--track-highlight-mid) 48%, #ffffff 3%) 0%,
-      color-mix(in srgb, var(--track-highlight-mid) 28%, transparent) 32%,
-      color-mix(in srgb, var(--track-highlight-mid) 10%, transparent) 56%,
-      transparent 78%
+      ellipse 175% 88% at 50% 62%,
+      color-mix(in srgb, var(--track-highlight-mid) 72%, #ffffff 6%) 0%,
+      color-mix(in srgb, var(--track-highlight-mid) 42%, transparent) 30%,
+      color-mix(in srgb, var(--track-highlight-mid) 16%, transparent) 52%,
+      transparent 80%
     ),
     radial-gradient(
-      ellipse 125% 52% at 50% 44%,
-      color-mix(in srgb, var(--track-highlight-mid) 26%, transparent) 0%,
-      color-mix(in srgb, var(--track-highlight-mid) 9%, transparent) 48%,
-      transparent 72%
+      ellipse 135% 58% at 50% 40%,
+      color-mix(in srgb, var(--track-highlight-mid) 44%, transparent) 0%,
+      color-mix(in srgb, var(--track-highlight-mid) 14%, transparent) 46%,
+      transparent 74%
     ),
     radial-gradient(
-      ellipse 34% 38% at 10% 54%,
-      color-mix(in srgb, var(--track-highlight-mid) 22%, transparent) 0%,
-      transparent 68%
+      ellipse 38% 42% at 10% 52%,
+      color-mix(in srgb, var(--track-highlight-mid) 38%, transparent) 0%,
+      transparent 66%
     ),
     radial-gradient(
-      ellipse 34% 38% at 90% 54%,
-      color-mix(in srgb, var(--track-highlight-mid) 22%, transparent) 0%,
-      transparent 68%
+      ellipse 38% 42% at 90% 52%,
+      color-mix(in srgb, var(--track-highlight-mid) 38%, transparent) 0%,
+      transparent 66%
     );
-  filter: blur(26px) saturate(1.05);
+  filter: blur(22px) saturate(1.12);
   will-change: opacity, transform;
 }
 
@@ -151,7 +201,7 @@ body.app-drag-files-active::after {
 .topbar {
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: 40;
   display: grid;
   grid-template-columns: 1fr minmax(260px, 460px) 1fr;
   align-items: center;
@@ -159,6 +209,8 @@ body.app-drag-files-active::after {
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);
   /* Слой 1: обводка (линия). Слой 2: радиальное свечение. Настройки независимы. */
+  backdrop-filter: blur(20px) saturate(1.18);
+  -webkit-backdrop-filter: blur(20px) saturate(1.18);
   background:
     linear-gradient(
       90deg,
@@ -177,8 +229,9 @@ body.app-drag-files-active::after {
       color-mix(in srgb, var(--track-highlight-mid) 6%, transparent) 28%,
       transparent 52%
     ),
-    var(--surface-top);
-  z-index: 2;
+    color-mix(in srgb, var(--surface-top) 84%, transparent);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.24);
+  transition: backdrop-filter 0.28s ease, background 0.28s ease, box-shadow 0.28s ease;
 }
 
 body.topbar-outline-off .topbar {
@@ -189,7 +242,7 @@ body.topbar-outline-off .topbar {
       color-mix(in srgb, var(--track-highlight-mid) 6%, transparent) 28%,
       transparent 52%
     ),
-    var(--surface-top);
+    color-mix(in srgb, var(--surface-top) 84%, transparent);
 }
 
 body.topbar-glow-off .topbar {
@@ -205,11 +258,11 @@ body.topbar-glow-off .topbar {
       transparent 100%
     )
       0 0 / 100% 2px no-repeat,
-    var(--surface-top);
+    color-mix(in srgb, var(--surface-top) 84%, transparent);
 }
 
 body.topbar-glow-off.topbar-outline-off .topbar {
-  background: var(--surface-top);
+  background: color-mix(in srgb, var(--surface-top) 84%, transparent);
 }
 
 body.theme-light .topbar {
@@ -242,7 +295,7 @@ body.theme-light.topbar-outline-off .topbar {
       color-mix(in srgb, var(--track-highlight-mid) 4%, transparent) 28%,
       transparent 52%
     ),
-    var(--surface-top);
+    color-mix(in srgb, var(--surface-top) 84%, transparent);
 }
 
 body.theme-light.topbar-glow-off .topbar {
@@ -258,11 +311,11 @@ body.theme-light.topbar-glow-off .topbar {
       transparent 100%
     )
       0 0 / 100% 2px no-repeat,
-    var(--surface-top);
+    color-mix(in srgb, var(--surface-top) 84%, transparent);
 }
 
 body.theme-light.topbar-glow-off.topbar-outline-off .topbar {
-  background: var(--surface-top);
+  background: color-mix(in srgb, var(--surface-top) 84%, transparent);
 }
 
 h1,
@@ -323,6 +376,8 @@ body.theme-light .theme-toggle-btn .theme-icon-sun {
 .search-wrap {
   position: relative;
   width: 100%;
+  overflow: visible;
+  z-index: 50;
 }
 
 .search-wrap .search-icon {
@@ -336,6 +391,7 @@ body.theme-light .theme-toggle-btn .theme-icon-sun {
   width: 24px;
   height: 24px;
   pointer-events: none;
+  z-index: 2;
 }
 
 .search-wrap .search-icon img {
@@ -343,25 +399,29 @@ body.theme-light .theme-toggle-btn .theme-icon-sun {
   height: 20px;
   object-fit: contain;
   display: block;
-  filter: invert(1) brightness(1.05);
-  opacity: 0.78;
+  filter: brightness(0) invert(1);
+  opacity: 1;
 }
 
 body.theme-light .search-wrap .search-icon img {
-  filter: none;
-  opacity: 0.72;
+  filter: brightness(0) invert(1);
+  opacity: 1;
 }
 
 #searchInput {
   width: 100%;
   height: 40px;
-  background: var(--surface-item);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-item) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 82%, #ffffff 8%);
   border-radius: 10px;
   color: var(--text);
   padding: 0 14px 0 44px;
+  position: relative;
+  z-index: 1;
   outline: none;
-  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.22s ease;
+  backdrop-filter: blur(12px) saturate(1.1);
+  -webkit-backdrop-filter: blur(12px) saturate(1.1);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
 }
 
 #searchInput::placeholder {
@@ -369,27 +429,201 @@ body.theme-light .search-wrap .search-icon img {
 }
 
 #searchInput.is-typing {
-  transform: scale(1.02);
   border-color: #707070;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
 
+.catalog-search-panel {
+  position: fixed;
+  z-index: 250;
+  margin: 0;
+  box-sizing: border-box;
+  background: var(--surface-item);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  padding: 10px 12px 8px;
+  max-height: min(70vh, 440px);
+  overflow-y: auto;
+}
+
+.catalog-search-panel.is-hidden {
+  display: none;
+}
+
+.catalog-search-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 18px;
+}
+
+@media (max-width: 720px) {
+  .catalog-search-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.catalog-search-heading {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8a8a8a;
+  margin-bottom: 6px;
+}
+
+body.theme-light .catalog-search-heading {
+  color: #6a6a6a;
+}
+
+.catalog-search-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.catalog-row-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border-radius: 8px;
+}
+
+.catalog-row-wrap:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+body.theme-light .catalog-row-wrap:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.catalog-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  flex: 1;
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+
+.catalog-row:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--track-highlight-mid) 70%, transparent);
+  outline-offset: 1px;
+}
+
+button.catalog-track-play-btn {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+button.catalog-track-play-btn:hover {
+  transform: none !important;
+  border-color: transparent !important;
+  background: transparent !important;
+}
+
+button.catalog-row-no-preview {
+  cursor: default;
+  opacity: 0.82;
+}
+
+.catalog-row-art {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #1a1a1a;
+}
+
+.catalog-row-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.catalog-row-title {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.catalog-row-sub {
+  font-size: 12px;
+  color: #9a9a9a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.catalog-preview-btn {
+  flex-shrink: 0;
+  align-self: center;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  margin-right: 4px;
+}
+
+.catalog-preview-btn.is-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.catalog-search-attribution {
+  margin: 10px 0 0;
+  font-size: 10px;
+  opacity: 0.62;
+  text-align: center;
+}
+
+.catalog-search-loading,
+.catalog-search-empty {
+  padding: 12px 8px;
+  text-align: center;
+}
+
+.catalog-search-column.is-hidden {
+  display: none;
+}
+
 button {
   border: 1px solid var(--border);
-  background: var(--surface-item);
+  background: color-mix(in srgb, var(--surface-item) 76%, transparent);
   color: var(--text);
   padding: 8px 14px;
   border-radius: 0;
   cursor: pointer;
   position: relative;
   overflow: hidden;
-  transition: transform 0.15s ease, border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
+  backdrop-filter: blur(10px) saturate(1.08);
+  -webkit-backdrop-filter: blur(10px) saturate(1.08);
+  transition: transform 0.2s cubic-bezier(0.2, 0.7, 0.2, 1), border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
 }
 
 button:hover {
   border-color: #7a7a7a;
-  background: #202020;
-  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--surface-item) 88%, #2a2a2a 12%);
+  transform: translateY(-1px) scale(1.015);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
 }
 
 .cursor-reactive {
@@ -418,6 +652,10 @@ button:hover {
   mask-composite: exclude;
   opacity: var(--near-opacity);
   transition: opacity 0.22s ease;
+}
+
+body.is-scrolling .cursor-reactive::after {
+  opacity: 0 !important;
 }
 
 button.ghost {
@@ -597,13 +835,15 @@ body::-webkit-scrollbar-thumb:hover {
   object-fit: contain;
   flex-shrink: 0;
   display: block;
+  filter: brightness(0) invert(1);
+  opacity: 1;
 }
 
 body.theme-light .category-item .category-home-icon,
 body.theme-light .category-item .category-playlists-icon,
 body.theme-light .category-item .category-settings-icon {
-  filter: brightness(0) saturate(100%);
-  opacity: 0.82;
+  filter: brightness(0) invert(1);
+  opacity: 1;
 }
 
 .category-item.is-active {
@@ -612,13 +852,40 @@ body.theme-light .category-item .category-settings-icon {
 }
 
 .panel {
-  background: var(--card);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 76%, #ffffff 8%);
   border-radius: 12px;
   padding: 12px;
   min-height: 240px;
   position: relative;
   overflow: hidden;
+  backdrop-filter: blur(16px) saturate(1.12);
+  -webkit-backdrop-filter: blur(16px) saturate(1.12);
+  box-shadow:
+    0 14px 30px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.panel:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 18px 36px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09);
+}
+
+body.is-scrolling .track-item,
+body.is-scrolling .playlist-card,
+body.is-scrolling .volume-panel {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+body.is-scrolling .track-item,
+body.is-scrolling .playlist-card {
+  transition: none !important;
+  transform: none !important;
 }
 
 .panel.cursor-reactive::after {
@@ -795,13 +1062,31 @@ body.theme-light .categories-user-login {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, #ffffff 8%);
   border-radius: 8px;
   padding: 8px 10px;
   min-height: 4.5rem;
-  background: var(--surface-item);
+  background: color-mix(in srgb, var(--surface-item) 78%, transparent);
   position: relative;
   overflow: hidden;
+  backdrop-filter: blur(10px) saturate(1.06);
+  -webkit-backdrop-filter: blur(10px) saturate(1.06);
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transform: perspective(900px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg)) translateY(var(--tilt-lift, 0px));
+  transform-style: preserve-3d;
+  will-change: transform;
+  transition: transform 0.13s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.track-item:hover {
+  transform: perspective(900px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg)) translateY(var(--tilt-lift, -3px));
+  border-color: color-mix(in srgb, var(--track-highlight-mid) 34%, var(--border));
+  box-shadow:
+    0 12px 24px rgba(0, 0, 0, 0.22),
+    0 0 0 1px color-mix(in srgb, var(--track-highlight-mid) 24%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .track-item.dragging {
@@ -1098,17 +1383,28 @@ body.theme-light .track-menu-header {
   inset: 0;
   z-index: 0;
   background: rgba(0, 0, 0, 0.58);
-  backdrop-filter: blur(6px);
 }
 
 body.theme-light .auth-modal-dim {
-  background: rgba(18, 20, 28, 0.4);
+  background: rgba(0, 0, 0, 0.4);
 }
 
 .auth-modal .track-details-dialog,
 .auth-modal-dialog {
   z-index: 1;
   max-height: none;
+}
+
+/* Окно входа — как обычная карточка .track-details-dialog (var(--card), без «стекла») */
+.auth-modal .track-details-dialog.auth-modal-dialog {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+}
+
+body.theme-light .auth-modal .track-details-dialog.auth-modal-dialog {
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.18);
 }
 
 .auth-modal .track-details-dialog-head.auth-modal-head {
@@ -1174,7 +1470,7 @@ body.theme-light .auth-modal-dim {
   border: none !important;
   border-radius: 8px;
   background: transparent;
-  color: #ffffff;
+  color: var(--text);
   cursor: pointer;
   transition: none;
   box-shadow: none;
@@ -1188,10 +1484,6 @@ button.auth-password-toggle:focus-visible,
   outline: none;
   transform: translateY(-50%);
   border-color: transparent !important;
-}
-
-body.theme-light .auth-password-toggle {
-  color: #374151;
 }
 
 body.theme-light button.auth-password-toggle:hover,
@@ -1209,13 +1501,9 @@ body.theme-light .auth-password-toggle:focus-visible {
 .auth-modal-label {
   font-size: 0.82rem;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text);
   text-align: center;
   width: 100%;
-}
-
-body.theme-light .auth-modal .auth-modal-label {
-  color: #1a1628;
 }
 
 .auth-modal-input {
@@ -1233,7 +1521,7 @@ body.theme-light .auth-modal .auth-modal-label {
   font-size: 0.95rem;
   font-family: inherit;
   outline: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
 
 @supports not (field-sizing: content) {
@@ -1255,8 +1543,12 @@ body.theme-light .auth-modal .auth-modal-label {
 }
 
 .auth-modal-input:focus {
-  border-color: color-mix(in srgb, var(--track-highlight-mid) 55%, var(--border));
+  border-color: color-mix(in srgb, var(--track-highlight-mid) 55%, rgba(255, 255, 255, 0.2));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--track-highlight-mid) 35%, transparent);
+}
+
+body.theme-light .auth-modal-input:focus {
+  border-color: color-mix(in srgb, var(--track-highlight-mid) 50%, rgba(0, 0, 0, 0.12));
 }
 
 .auth-modal-form > .auth-modal-error {
@@ -1301,6 +1593,14 @@ body.theme-light .auth-modal .auth-modal-label {
   background: transparent;
 }
 
+.track-details-backdrop:hover,
+.track-details-backdrop:focus-visible {
+  border: none !important;
+  background: transparent !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
 .track-details-dialog {
   position: relative;
   z-index: 1;
@@ -1310,9 +1610,23 @@ body.theme-light .auth-modal .auth-modal-label {
   flex-direction: column;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) 82%, transparent);
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
   overflow: hidden;
+  backdrop-filter: blur(18px) saturate(1.1);
+  -webkit-backdrop-filter: blur(18px) saturate(1.1);
+  animation: modalRise 0.28s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@keyframes modalRise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 body.theme-light .track-details-dialog {
@@ -1437,7 +1751,7 @@ body.theme-light .track-details-dialog {
 }
 
 body.theme-light .category-item .category-heart-icon {
-  fill: #4b5563;
+  fill: #ffffff;
 }
 
 .likes-view {
@@ -1643,16 +1957,20 @@ body.theme-light .likes-title {
 }
 
 .settings-intro {
-  max-width: 32rem;
+  max-width: min(42rem, 100%);
   line-height: 1.45;
 }
 
 .settings-controls-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 12px;
-  max-width: 38rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 14px;
+  max-width: min(58rem, 100%);
   margin-top: 14px;
+}
+
+.settings-control-row-full {
+  grid-column: 1 / -1;
 }
 
 .settings-control-row {
@@ -1777,10 +2095,23 @@ body.theme-light .likes-title {
 }
 
 .playlist-card {
-  background: var(--surface-strong);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-strong) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, #ffffff 8%);
   padding: 10px;
   position: relative;
+  border-radius: 12px;
+  backdrop-filter: blur(12px) saturate(1.08);
+  -webkit-backdrop-filter: blur(12px) saturate(1.08);
+  transition: transform 0.26s ease, box-shadow 0.26s ease, border-color 0.26s ease;
+  transform: perspective(1000px) rotateX(var(--ptilt-x, 0deg)) rotateY(var(--ptilt-y, 0deg)) translateY(var(--ptilt-lift, 0px));
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.playlist-card:hover {
+  transform: perspective(1000px) rotateX(var(--ptilt-x, 0deg)) rotateY(var(--ptilt-y, 0deg)) translateY(var(--ptilt-lift, -2px));
+  border-color: color-mix(in srgb, var(--track-highlight-mid) 32%, var(--border));
+  box-shadow: 0 14px 24px rgba(0, 0, 0, 0.2);
 }
 
 .playlist-delete-btn {
@@ -1875,6 +2206,8 @@ body.theme-light .player-bar .player-btn:focus-visible {
   right: 0;
   bottom: 0;
   border-top: 1px solid var(--border);
+  backdrop-filter: blur(26px) saturate(1.22);
+  -webkit-backdrop-filter: blur(26px) saturate(1.22);
   background:
     radial-gradient(
       ellipse 85% 200% at 50% 115%,
@@ -1882,13 +2215,69 @@ body.theme-light .player-bar .player-btn:focus-visible {
       color-mix(in srgb, var(--track-highlight-mid) 6%, transparent) 42%,
       transparent 70%
     ),
-    var(--player-bg);
+    color-mix(in srgb, var(--player-bg) 72%, transparent);
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 2.75fr) minmax(0, 1fr);
   gap: 10px;
   align-items: center;
   padding: 12px 16px;
   z-index: 2;
+  box-shadow:
+    0 -12px 30px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transition: backdrop-filter 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.player-progress-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 4px;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  overflow: visible;
+  border: none;
+  cursor: pointer;
+}
+
+.player-progress-fill {
+  width: var(--player-progress-pct, 0%);
+  height: 100%;
+  border-radius: 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--track-highlight-mid) 78%, #ffffff 8%) 0%,
+    color-mix(in srgb, var(--track-highlight-mid) 96%, #ffffff 2%) 100%
+  );
+  box-shadow: 0 0 10px color-mix(in srgb, var(--track-highlight-mid) 48%, transparent);
+  transition: width 0.12s linear;
+}
+
+.player-progress-hint {
+  position: absolute;
+  top: -30px;
+  left: 0;
+  transform: translateX(-50%) translateY(4px) scale(0.95);
+  padding: 4px 7px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, #ffffff 10%);
+  background: color-mix(in srgb, var(--surface-strong) 90%, transparent);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  backdrop-filter: blur(8px) saturate(1.08);
+  -webkit-backdrop-filter: blur(8px) saturate(1.08);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  white-space: nowrap;
+}
+
+.player-progress-line.is-hovered .player-progress-hint,
+.player-progress-line.is-dragging .player-progress-hint {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0) scale(1);
 }
 
 body.theme-light .player-bar {
@@ -1899,11 +2288,11 @@ body.theme-light .player-bar {
       color-mix(in srgb, var(--track-highlight-mid) 4%, transparent) 42%,
       transparent 70%
     ),
-    var(--player-bg);
+    color-mix(in srgb, var(--player-bg) 74%, transparent);
 }
 
 body.player-glow-off .player-bar {
-  background: var(--player-bg);
+  background: color-mix(in srgb, var(--player-bg) 72%, transparent);
 }
 
 .legal-wrap {
@@ -1995,6 +2384,9 @@ body.player-glow-off .player-bar {
 
 .volume-wrap {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .player-right {
@@ -2011,10 +2403,14 @@ body.player-glow-off .player-bar {
   width: 220px;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  background: #111;
+  background: color-mix(in srgb, #111 82%, transparent);
   display: none;
   align-items: center;
   gap: 10px;
+  border-radius: 12px;
+  backdrop-filter: blur(14px) saturate(1.12);
+  -webkit-backdrop-filter: blur(14px) saturate(1.12);
+  box-shadow: 0 16px 28px rgba(0, 0, 0, 0.28);
 }
 
 body.theme-light .volume-panel {
@@ -2024,6 +2420,66 @@ body.theme-light .volume-panel {
 
 .volume-panel.open {
   display: flex;
+}
+
+.eq-dialog {
+  width: min(46rem, 100%);
+}
+
+.eq-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.eq-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.eq-preset-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.eq-preset-select {
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-item);
+  color: var(--text);
+  padding: 0 10px;
+}
+
+.eq-bands {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(46px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.eq-band {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.eq-band-slider {
+  appearance: slider-vertical;
+  -webkit-appearance: slider-vertical;
+  width: 28px;
+  height: 140px;
+  accent-color: var(--track-highlight-mid);
+}
+
+.eq-band-label {
+  font-size: 0.82rem;
+  color: var(--muted);
 }
 
 .volume-label {
@@ -2043,6 +2499,31 @@ body.theme-light .volume-panel {
 
 .controls .player-btn + .player-btn {
   margin-left: -1px;
+}
+
+.player-mode-btn {
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.player-mode-btn img {
+  display: block;
+  pointer-events: none;
+}
+
+.player-mode-btn.is-active {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--track-highlight-mid) 60%, transparent);
+  background: color-mix(in srgb, var(--track-highlight-mid) 16%, #171717) !important;
+}
+
+body.theme-light .player-mode-btn.is-active {
+  background: color-mix(in srgb, var(--track-highlight-mid) 20%, #e4e7ec) !important;
+}
+
+body.theme-light .player-mode-btn img {
+  filter: brightness(0.28);
 }
 
 .player-btn {
@@ -2077,11 +2558,7 @@ body.theme-light #volumeRange {
 }
 
 .timeline {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  width: 100%;
+  display: none;
 }
 
 #seekBar {
@@ -2194,6 +2671,13 @@ body.theme-light #seekBar::-moz-range-thumb {
   }
 }
 
+@media (max-width: 1100px) {
+  .settings-controls-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: min(40rem, 100%);
+  }
+}
+
 @media (max-width: 900px) {
   .settings-controls-grid {
     grid-template-columns: 1fr;
@@ -2284,5 +2768,21 @@ body.theme-light #seekBar::-moz-range-thumb {
   .volume-panel {
     left: 0;
     right: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after,
+  .track-details-dialog {
+    animation: none !important;
+  }
+
+  .panel,
+  .track-item,
+  .playlist-card,
+  button {
+    transition: none !important;
+    transform: none !important;
   }
 }

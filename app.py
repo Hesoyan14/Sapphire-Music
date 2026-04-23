@@ -1,11 +1,15 @@
 import os
 import sqlite3
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote_plus
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 import json
+
+import requests
 import base64
 import tempfile
 
@@ -80,6 +84,32 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def _catalog_timeout(default: float = 18.0) -> float:
+    try:
+        return float(os.environ.get("SAPPHIRE_CATALOG_TIMEOUT", "") or default)
+    except ValueError:
+        return default
+
+
+_CATALOG_UA = "Sapphire/1.0 (+https://github.com/Hesoyan14/Sapphire-Music)"
+
+
+def fetch_json_url(url: str, timeout: float | None = None):
+    """HTTP GET JSON через requests (надёжнее urllib/SSL на Windows). При ошибке — None."""
+    t = timeout if timeout is not None else _catalog_timeout()
+    try:
+        resp = requests.get(
+            url,
+            headers={"User-Agent": _CATALOG_UA, "Accept": "application/json"},
+            timeout=t,
+        )
+        if resp.status_code >= 400:
+            return None
+        return resp.json()
+    except Exception:
+        return None
+
+
 def format_duration(seconds: float) -> str:
     total = int(seconds or 0)
     minutes = total // 60
@@ -142,6 +172,383 @@ def fetch_cover_url(artist: str, title: str):
         except Exception:
             continue
     return ""
+
+
+def itunes_catalog_search(term: str, country: str = "us"):
+    """Поиск треков и артистов через iTunes Search API (бесплатно, без ключа)."""
+    term = (term or "").strip()
+    if len(term) < 2:
+        return {"tracks": [], "artists": []}
+    if len(term) > 120:
+        term = term[:120]
+    cc = (country or "us").strip().lower()[:2] or "us"
+    q = quote_plus(term)
+    base = f"https://itunes.apple.com/search?term={q}&country={cc}&media=music&limit=25"
+    songs_url = f"{base}&entity=song"
+    artists_url = f"{base}&entity=musicArtist"
+
+    def _load(url):
+        return fetch_json_url(url)
+
+    out_tracks = []
+    out_artists = []
+    seen_artist_ids = set()
+    seen_artist_names = set()
+
+    data_s = _load(songs_url)
+    if data_s and isinstance(data_s.get("results"), list):
+        for r in data_s["results"][:20]:
+            title = (r.get("trackName") or "").strip()
+            if not title:
+                continue
+            kind = r.get("kind")
+            if kind in (
+                "podcast",
+                "podcast-episode",
+                "audiobook",
+                "feature-movie",
+                "tv-episode",
+                "book",
+                "software",
+            ):
+                continue
+            art = r.get("artworkUrl100") or ""
+            if art:
+                art = art.replace("100x100bb", "160x160bb")
+            out_tracks.append(
+                {
+                    "title": title,
+                    "artist": r.get("artistName") or "",
+                    "album": r.get("collectionName") or "",
+                    "artwork": art,
+                    "url": r.get("trackViewUrl") or "",
+                    "preview_url": r.get("previewUrl") or "",
+                }
+            )
+
+    data_a = _load(artists_url)
+    if data_a and isinstance(data_a.get("results"), list):
+        for r in data_a["results"][:12]:
+            aid = r.get("artistId")
+            name = (r.get("artistName") or "").strip()
+            if not name:
+                continue
+            if aid is not None:
+                if aid in seen_artist_ids:
+                    continue
+                seen_artist_ids.add(aid)
+            else:
+                key = name.lower()
+                if key in seen_artist_names:
+                    continue
+                seen_artist_names.add(key)
+            art = r.get("artworkUrl100") or ""
+            if art:
+                art = art.replace("100x100bb", "160x160bb")
+            out_artists.append(
+                {
+                    "name": name,
+                    "artwork": art,
+                    "url": r.get("artistLinkUrl") or "",
+                }
+            )
+
+    return {"tracks": out_tracks, "artists": out_artists}
+
+
+def merge_catalog_ordered(*parts, max_tracks=15, max_artists=12):
+    """Объединяет каталоги без дублей; порядок частей = приоритет (раньше важнее)."""
+    tracks = []
+    artists = []
+    seen_t = set()
+    seen_a = set()
+    for part in parts:
+        if not part:
+            continue
+        for t in part.get("tracks") or []:
+            if len(tracks) >= max_tracks:
+                break
+            title = (t.get("title") or "").strip()
+            artist = (t.get("artist") or "").strip()
+            if not title and not artist:
+                continue
+            key = (title.lower(), artist.lower())
+            if key in seen_t:
+                continue
+            seen_t.add(key)
+            tracks.append(t)
+        for a in part.get("artists") or []:
+            if len(artists) >= max_artists:
+                break
+            name = (a.get("name") or "").strip()
+            if not name:
+                continue
+            nk = name.lower()
+            if nk in seen_a:
+                continue
+            seen_a.add(nk)
+            artists.append(a)
+    return {"tracks": tracks, "artists": artists}
+
+
+def itunes_catalog_search_merged(term: str):
+    """Несколько витрин iTunes (СНГ + US), чтобы находить и русские, и зарубежные релизы."""
+    term = (term or "").strip()
+    if len(term) < 2:
+        return {"tracks": [], "artists": []}
+    raw = os.environ.get("SAPPHIRE_ITUNES_COUNTRIES", "").strip()
+    if raw:
+        countries = []
+        for c in raw.split(","):
+            c = c.strip().lower()[:2]
+            if len(c) == 2:
+                countries.append(c)
+        if not countries:
+            countries = ["ru", "kz", "ua", "us", "gb"]
+    else:
+        countries = ["ru", "kz", "ua", "us", "gb"]
+    results = []
+    max_workers = min(8, len(countries))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futs = [pool.submit(itunes_catalog_search, term, cc) for cc in countries]
+        for fut in futs:
+            try:
+                results.append(fut.result(timeout=55))
+            except Exception:
+                results.append({"tracks": [], "artists": []})
+    return merge_catalog_ordered(*results, max_tracks=22, max_artists=16)
+
+
+_MUSICBRAINZ_UA = "Sapphire/1.0 (+https://github.com/Hesoyan14/Sapphire-Music)"
+
+
+def _musicbrainz_get(entity: str, query_string: str, timeout: float | None = None):
+    """entity: recording | artist; query_string без fmt=json."""
+    t = timeout if timeout is not None else _catalog_timeout()
+    url = f"https://musicbrainz.org/ws/2/{entity}?{query_string}&fmt=json"
+    resp = requests.get(
+        url,
+        headers={"User-Agent": _MUSICBRAINZ_UA, "Accept": "application/json"},
+        timeout=t,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _mb_recording_artist_line(recording: dict) -> str:
+    parts = []
+    for ac in recording.get("artist-credit") or []:
+        if not isinstance(ac, dict):
+            continue
+        art = ac.get("artist")
+        name = ""
+        if isinstance(art, dict) and art.get("name"):
+            name = str(art["name"]).strip()
+        elif ac.get("name"):
+            name = str(ac["name"]).strip()
+        if not name:
+            continue
+        parts.append((str(ac.get("joinphrase") or ""), name))
+    if not parts:
+        return ""
+    line = parts[0][1]
+    for jp, name in parts[1:]:
+        line += jp + name
+    return line
+
+
+def _mb_first_release_title(recording: dict) -> str:
+    rels = recording.get("releases") or []
+    if not rels or not isinstance(rels[0], dict):
+        return ""
+    return str(rels[0].get("title") or "").strip()
+
+
+def musicbrainz_catalog_search(term: str):
+    """MusicBrainz: русские и локальные релизы, без API-ключа (нужен только User-Agent)."""
+    term = (term or "").strip()
+    if len(term) < 2:
+        return {"tracks": [], "artists": []}
+    if len(term) > 100:
+        term = term[:100]
+    q = quote_plus(term)
+    out_tracks = []
+    out_artists = []
+
+    try:
+        data = _musicbrainz_get("recording", f"query={q}&limit=15")
+        for rec in (data.get("recordings") or [])[:15]:
+            if not isinstance(rec, dict):
+                continue
+            rid = rec.get("id")
+            title = (rec.get("title") or "").strip()
+            if not title:
+                continue
+            artist = _mb_recording_artist_line(rec)
+            album = _mb_first_release_title(rec)
+            out_tracks.append(
+                {
+                    "title": title,
+                    "artist": artist,
+                    "album": album,
+                    "artwork": "",
+                    "url": f"https://musicbrainz.org/recording/{rid}" if rid else "",
+                    "preview_url": "",
+                }
+            )
+    except Exception:
+        pass
+
+    time.sleep(1.05)
+
+    try:
+        data = _musicbrainz_get("artist", f"query={q}&limit=12")
+        seen = set()
+        for art in (data.get("artists") or [])[:12]:
+            if not isinstance(art, dict):
+                continue
+            aid = art.get("id")
+            name = (art.get("name") or "").strip()
+            if not name:
+                continue
+            nk = name.lower()
+            if nk in seen:
+                continue
+            seen.add(nk)
+            out_artists.append(
+                {
+                    "name": name,
+                    "artwork": "",
+                    "url": f"https://musicbrainz.org/artist/{aid}" if aid else "",
+                }
+            )
+    except Exception:
+        pass
+
+    return {"tracks": out_tracks, "artists": out_artists}
+
+
+def deezer_catalog_search(term: str):
+    """Резервный каталог Deezer (без ключа), если iTunes недоступен или пустой."""
+    term = (term or "").strip()
+    if len(term) < 2:
+        return {"tracks": [], "artists": []}
+    if len(term) > 120:
+        term = term[:120]
+    q = quote_plus(term)
+    out_tracks = []
+    out_artists = []
+
+    def _load(url):
+        return fetch_json_url(url)
+
+    dt = _load(f"https://api.deezer.com/search/track?q={q}&limit=15")
+    if dt and isinstance(dt.get("data"), list):
+        for t in dt["data"][:15]:
+            alb = t.get("album") or {}
+            art_obj = t.get("artist") or {}
+            cover = alb.get("cover_medium") or art_obj.get("picture_medium") or ""
+            out_tracks.append(
+                {
+                    "title": t.get("title") or "",
+                    "artist": art_obj.get("name") or "",
+                    "album": alb.get("title") or "",
+                    "artwork": cover,
+                    "url": t.get("link") or "",
+                    "preview_url": t.get("preview") or "",
+                }
+            )
+
+    da = _load(f"https://api.deezer.com/search/artist?q={q}&limit=12")
+    if da and isinstance(da.get("data"), list):
+        seen = set()
+        for a in da["data"][:12]:
+            name = (a.get("name") or "").strip()
+            if not name:
+                continue
+            key = name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out_artists.append(
+                {
+                    "name": name,
+                    "artwork": a.get("picture_medium") or "",
+                    "url": a.get("link") or "",
+                }
+            )
+
+    return {"tracks": out_tracks, "artists": out_artists}
+
+
+def discogs_catalog_search(term: str):
+    """Discogs: поиск без токена (нужен User-Agent), хорошо покрывает рус/советские релизы."""
+    term = (term or "").strip()
+    if len(term) < 2:
+        return {"tracks": [], "artists": []}
+    if len(term) > 100:
+        term = term[:100]
+    q = quote_plus(term)
+    ua = "Sapphire/1.0 +https://github.com/Hesoyan14/Sapphire-Music"
+    out_tracks = []
+    out_artists = []
+
+    try:
+        url = f"https://api.discogs.com/database/search?q={q}&type=release&per_page=15"
+        resp = requests.get(url, headers={"User-Agent": ua}, timeout=_catalog_timeout())
+        if resp.status_code == 200:
+            data = resp.json()
+            for item in (data.get("results") or [])[:15]:
+                if not isinstance(item, dict):
+                    continue
+                raw_title = (item.get("title") or "").strip()
+                if not raw_title:
+                    continue
+                artist = ""
+                name = raw_title
+                if " - " in raw_title:
+                    artist, name = raw_title.split(" - ", 1)
+                    artist, name = artist.strip(), name.strip()
+                thumb = (item.get("thumb") or item.get("cover_image") or "").strip()
+                uri = item.get("uri") or ""
+                link = f"https://www.discogs.com{uri}" if uri.startswith("/") else (uri if uri.startswith("http") else "")
+                out_tracks.append(
+                    {
+                        "title": name or raw_title,
+                        "artist": artist or "—",
+                        "album": "",
+                        "artwork": thumb,
+                        "url": link,
+                        "preview_url": "",
+                    }
+                )
+    except Exception:
+        pass
+
+    try:
+        url = f"https://api.discogs.com/database/search?q={q}&type=artist&per_page=12"
+        resp = requests.get(url, headers={"User-Agent": ua}, timeout=_catalog_timeout())
+        if resp.status_code == 200:
+            data = resp.json()
+            seen = set()
+            for item in (data.get("results") or [])[:12]:
+                if not isinstance(item, dict) or item.get("type") != "artist":
+                    continue
+                name = (item.get("title") or "").strip()
+                if not name:
+                    continue
+                nk = name.lower()
+                if nk in seen:
+                    continue
+                seen.add(nk)
+                thumb = (item.get("thumb") or "").strip()
+                uri = item.get("uri") or ""
+                link = f"https://www.discogs.com{uri}" if uri.startswith("/") else (uri if uri.startswith("http") else "")
+                out_artists.append({"name": name, "artwork": thumb, "url": link})
+    except Exception:
+        pass
+
+    return {"tracks": out_tracks, "artists": out_artists}
 
 
 def extract_track_metadata(filepath: Path, original_name: str):
@@ -391,6 +798,7 @@ def require_login():
         "auth_logout",
         "auth_register",
         "health_image",
+        "api_catalog_search",
     ):
         return None
     if session.get("logged_in"):
@@ -453,6 +861,75 @@ def index():
         authed=logged,
         username=session.get("username") or "",
     )
+
+
+@app.route("/api/catalog-search", methods=["GET"])
+def api_catalog_search():
+    """iTunes (несколько стран СНГ+US) + MusicBrainz (рус/локал) + при малом ответе Deezer."""
+    q = request.args.get("q", "").strip()
+    if len(q) < 2:
+        return jsonify({"tracks": [], "artists": [], "source": "none"})
+    try:
+        def _safe_itunes_merged(qterm):
+            try:
+                return itunes_catalog_search_merged(qterm)
+            except Exception:
+                return {"tracks": [], "artists": []}
+
+        def _safe_mb(qterm):
+            try:
+                return musicbrainz_catalog_search(qterm)
+            except Exception:
+                return {"tracks": [], "artists": []}
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            fut_it = pool.submit(_safe_itunes_merged, q)
+            fut_mb = pool.submit(_safe_mb, q)
+            try:
+                it = fut_it.result(timeout=95)
+            except Exception:
+                it = {"tracks": [], "artists": []}
+            try:
+                mb = fut_mb.result(timeout=95)
+            except Exception:
+                mb = {"tracks": [], "artists": []}
+        merged = merge_catalog_ordered(it, mb, max_tracks=15, max_artists=12)
+        if len(merged["tracks"]) < 6:
+            try:
+                dz = deezer_catalog_search(q)
+                merged = merge_catalog_ordered(merged, dz, max_tracks=15, max_artists=12)
+            except Exception:
+                pass
+        if len(merged["tracks"]) < 8 or len(merged["artists"]) < 4:
+            try:
+                dg = discogs_catalog_search(q)
+                merged = merge_catalog_ordered(merged, dg, max_tracks=15, max_artists=12)
+            except Exception:
+                pass
+        if not merged["tracks"] and not merged["artists"]:
+            try:
+                merged = deezer_catalog_search(q)
+            except Exception:
+                merged = {"tracks": [], "artists": []}
+        if not merged["tracks"] and not merged["artists"]:
+            try:
+                merged = discogs_catalog_search(q)
+            except Exception:
+                pass
+        merged["source"] = "mixed" if (merged["tracks"] or merged["artists"]) else "none"
+        return jsonify(merged)
+    except Exception:
+        try:
+            payload = deezer_catalog_search(q)
+            payload["source"] = "deezer"
+            return jsonify(payload)
+        except Exception:
+            try:
+                payload = discogs_catalog_search(q)
+                payload["source"] = "discogs"
+                return jsonify(payload)
+            except Exception:
+                return jsonify({"error": "catalog_unavailable"}), 502
 
 
 @app.route("/tracks", methods=["GET"])

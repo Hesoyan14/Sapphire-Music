@@ -8,14 +8,26 @@ const audioPlayer = document.getElementById("audioPlayer");
 const playPauseBtn = document.getElementById("playPauseBtn");
 const prevBtn = document.getElementById("prevBtn");
 const nextBtn = document.getElementById("nextBtn");
+const shuffleBtn = document.getElementById("shuffleBtn");
+const repeatBtn = document.getElementById("repeatBtn");
 const seekBar = document.getElementById("seekBar");
 const nowTitle = document.getElementById("nowTitle");
 const nowArtist = document.getElementById("nowArtist");
 const currentTime = document.getElementById("currentTime");
 const totalTime = document.getElementById("totalTime");
+const playerProgressFill = document.getElementById("playerProgressFill");
+const playerProgressLine = document.getElementById("playerProgressLine");
+const playerProgressHint = document.getElementById("playerProgressHint");
 const volumeBtn = document.getElementById("volumeBtn");
 const volumePanel = document.getElementById("volumePanel");
 const volumeRange = document.getElementById("volumeRange");
+const eqBtn = document.getElementById("eqBtn");
+const eqModal = document.getElementById("eqModal");
+const eqBackdrop = document.getElementById("eqBackdrop");
+const eqClose = document.getElementById("eqClose");
+const eqPresetSelect = document.getElementById("eqPresetSelect");
+const eqEnabledToggle = document.getElementById("eqEnabledToggle");
+const eqBands = document.getElementById("eqBands");
 const searchInput = document.getElementById("searchInput");
 const categoryItems = document.querySelectorAll(".category-item");
 const mainView = document.getElementById("mainView");
@@ -67,7 +79,8 @@ let playlists = [];
 let currentQueueIndex = -1;
 let selectedTrackId = null;
 let searchQuery = "";
-let typingTimer = null;
+let shuffleOn = false;
+let repeatOn = false;
 let activeTrackMenuId = null;
 let currentView = "main";
 let openedPlaylistId = null;
@@ -80,15 +93,28 @@ let beatFreqData = null;
 let beatAudioGraphReady = false;
 let beatAudioGraphFailed = false;
 let beatGlowRafId = 0;
+let eqFilters = [];
+let eqGains = [];
+let eqEnabled = true;
 let beatPrevBass = 0;
 let beatSmoothed = 0;
+let beatLiftSmoothed = 0;
 const FAVORITES_KEY = "sapphire_favorites";
 const TRACK_HIGHLIGHT_KEY = "sapphire_track_highlight";
 const PLAYER_GLOW_KEY = "sapphire_player_glow";
 const TOPBAR_GLOW_KEY = "sapphire_topbar_glow";
 const TOPBAR_OUTLINE_KEY = "sapphire_topbar_outline";
 const TRACK_BEAT_GLOW_KEY = "sapphire_track_beat_glow";
+const SHUFFLE_KEY = "sapphire_shuffle";
+const REPEAT_KEY = "sapphire_repeat";
 const DEFAULT_TRACK_HIGHLIGHT = "#b565f9";
+const EQ_FREQS = [62, 125, 250, 500, 1000, 2000, 4000, 8000, 12000, 16000];
+const EQ_PRESETS = {
+  custom: null,
+  flat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  bass: [6, 5, 4, 2, 0, -1, -1, 0, 1, 2],
+  vocal: [-2, -1, 0, 2, 4, 5, 3, 1, 0, -1],
+};
 const HEART_SVG_PATH_D =
   "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z";
 
@@ -154,9 +180,9 @@ function applyTopbarGlow(enabled) {
 }
 
 function loadTopbarGlow() {
-  const v = localStorage.getItem(TOPBAR_GLOW_KEY);
-  const enabled = v !== "0" && v !== "false";
+  const enabled = false;
   document.body.classList.toggle("topbar-glow-off", !enabled);
+  localStorage.setItem(TOPBAR_GLOW_KEY, "0");
   if (topbarGlowToggle) topbarGlowToggle.checked = enabled;
 }
 
@@ -180,15 +206,16 @@ function applyTrackBeatGlow(enabled) {
 }
 
 function loadTrackBeatGlow() {
-  const v = localStorage.getItem(TRACK_BEAT_GLOW_KEY);
-  const enabled = v !== "0" && v !== "false";
+  const enabled = false;
   document.body.classList.toggle("track-beat-glow-off", !enabled);
+  localStorage.setItem(TRACK_BEAT_GLOW_KEY, "0");
   if (trackBeatGlowToggle) trackBeatGlowToggle.checked = enabled;
 }
 
 function clearAppBeatGlow() {
   document.documentElement.style.removeProperty("--app-beat-glow-opacity");
   document.documentElement.style.removeProperty("--app-beat-glow-wave-scale");
+  document.documentElement.style.removeProperty("--app-beat-glow-translate-y");
 }
 
 function stopBeatGlowRaf() {
@@ -196,6 +223,7 @@ function stopBeatGlowRaf() {
   beatGlowRafId = 0;
   beatPrevBass = 0;
   beatSmoothed = 0;
+  beatLiftSmoothed = 0;
   clearAppBeatGlow();
 }
 
@@ -216,16 +244,65 @@ function prepareBeatAnalyser() {
     beatAnalyser.fftSize = 256;
     beatAnalyser.smoothingTimeConstant = 0.78;
     beatSourceNode = beatAudioCtx.createMediaElementSource(audioPlayer);
-    beatSourceNode.connect(beatAnalyser);
+    eqFilters = EQ_FREQS.map((freq) => {
+      const f = beatAudioCtx.createBiquadFilter();
+      f.type = "peaking";
+      f.frequency.value = freq;
+      f.Q.value = 1.05;
+      f.gain.value = 0;
+      return f;
+    });
+    eqGains = EQ_FREQS.map(() => 0);
+    let node = beatSourceNode;
+    eqFilters.forEach((filter) => {
+      node.connect(filter);
+      node = filter;
+    });
+    node.connect(beatAnalyser);
     beatAnalyser.connect(beatAudioCtx.destination);
     beatFreqData = new Uint8Array(beatAnalyser.frequencyBinCount);
     beatAudioGraphReady = true;
+    applyEqState();
     void beatAudioCtx.resume();
     return true;
   } catch (_err) {
     beatAudioGraphFailed = true;
     return false;
   }
+}
+
+function applyEqState() {
+  if (!eqFilters.length) return;
+  eqFilters.forEach((filter, idx) => {
+    const gain = eqEnabled ? Number(eqGains[idx] || 0) : 0;
+    filter.gain.value = gain;
+  });
+}
+
+function openEqModal() {
+  if (!eqModal) return;
+  eqModal.classList.remove("is-hidden");
+  eqModal.setAttribute("aria-hidden", "false");
+}
+
+function closeEqModal() {
+  if (!eqModal) return;
+  eqModal.classList.add("is-hidden");
+  eqModal.setAttribute("aria-hidden", "true");
+}
+
+function renderEqBands() {
+  if (!eqBands) return;
+  eqBands.innerHTML = "";
+  EQ_FREQS.forEach((freq, idx) => {
+    const col = document.createElement("label");
+    col.className = "eq-band";
+    col.innerHTML = `
+      <input class="eq-band-slider" type="range" min="-12" max="12" step="0.5" value="${eqGains[idx] || 0}" data-eq-band="${idx}" />
+      <span class="eq-band-label">${freq >= 1000 ? `${freq / 1000} кГц` : `${freq} Гц`}</span>
+    `;
+    eqBands.appendChild(col);
+  });
 }
 
 function beatGlowTick() {
@@ -247,17 +324,26 @@ function beatGlowTick() {
     bassNorm = sum / (14 * 255);
   }
 
-  const flux = Math.max(0, bassNorm - beatPrevBass * 0.94);
-  beatPrevBass = beatPrevBass * 0.9 + bassNorm * 0.1;
-  beatSmoothed = beatSmoothed * 0.82 + bassNorm * 0.12 + Math.min(0.55, flux * 5.5) * 0.24;
+  const flux = Math.max(0, bassNorm - beatPrevBass * 0.92);
+  beatPrevBass = beatPrevBass * 0.88 + bassNorm * 0.12;
+  beatSmoothed =
+    beatSmoothed * 0.78 + bassNorm * 0.14 + Math.min(0.62, flux * 6.2) * 0.28;
 
   const t = performance.now() / 1000;
-  const breath = ((Math.sin(t * Math.PI * 2 * 2.4) + 1) * 0.5) * 0.09;
+  const breath = ((Math.sin(t * Math.PI * 2 * 2.4) + 1) * 0.5) * 0.1;
   const vol = Math.sqrt(Math.max(0, Math.min(1, audioPlayer.volume)));
-  let glow = beatSmoothed * 0.62 + breath * (0.2 + beatSmoothed) + vol * 0.28;
-  glow = Math.max(0.06, Math.min(1, glow)) * 0.55;
+  let glow = beatSmoothed * 0.78 + breath * (0.26 + beatSmoothed * 0.35) + vol * 0.42;
+  glow = Math.max(0.1, Math.min(1, glow)) * 0.92;
 
-  const waveScale = 1 + Math.min(0.18, flux * 4.2) + beatSmoothed * 0.05;
+  const liftDrive = Math.min(
+    1,
+    flux * 7.8 + beatSmoothed * 1.2 + vol * 0.72 + bassNorm * 0.55
+  );
+  beatLiftSmoothed = beatLiftSmoothed * 0.66 + liftDrive * 0.34;
+  const panelLiftPct = -beatLiftSmoothed * 12;
+  document.documentElement.style.setProperty("--app-beat-glow-translate-y", `${panelLiftPct.toFixed(2)}%`);
+
+  const waveScale = 1 + Math.min(0.3, flux * 5.8) + beatSmoothed * 0.09;
   document.documentElement.style.setProperty("--app-beat-glow-wave-scale", waveScale.toFixed(3));
 
   document.documentElement.style.setProperty("--app-beat-glow-opacity", glow.toFixed(3));
@@ -291,6 +377,7 @@ function updateElementCursorGlow(element, clientX, clientY) {
 }
 
 function updateProximityGlow(clientX, clientY) {
+  if (document.body.classList.contains("is-scrolling")) return;
   const elements = document.querySelectorAll(".cursor-reactive");
   elements.forEach((element) => {
     const rect = element.getBoundingClientRect();
@@ -329,50 +416,9 @@ function onUiUpdated() {
 }
 
 function initSmoothTrackListScroll(el) {
-  if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  if (el.dataset.smoothScrollInit === "1") return;
+  // Native scrolling is significantly smoother in pywebview/Chromium for long lists.
+  if (!el) return;
   el.dataset.smoothScrollInit = "1";
-
-  let rafId = 0;
-  let targetScroll = null;
-
-  const cancelAnim = () => {
-    if (rafId) cancelAnimationFrame(rafId);
-    rafId = 0;
-    targetScroll = null;
-  };
-
-  el.addEventListener(
-    "wheel",
-    (e) => {
-      if (e.ctrlKey) return;
-      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
-
-      const max = el.scrollHeight - el.clientHeight;
-      if (max <= 0) return;
-
-      e.preventDefault();
-
-      const curTop = el.scrollTop;
-      if (targetScroll === null) targetScroll = curTop;
-      targetScroll = Math.max(0, Math.min(max, targetScroll + e.deltaY));
-
-      const step = () => {
-        const cur = el.scrollTop;
-        const diff = targetScroll - cur;
-        if (Math.abs(diff) < 0.45) {
-          el.scrollTop = targetScroll;
-          cancelAnim();
-          return;
-        }
-        el.scrollTop = cur + diff * 0.2;
-        rafId = requestAnimationFrame(step);
-      };
-
-      if (!rafId) rafId = requestAnimationFrame(step);
-    },
-    { passive: false }
-  );
 }
 
 function filteredTracks() {
@@ -381,6 +427,33 @@ function filteredTracks() {
     const blob = `${track.title} ${track.artist} ${track.original_filename || ""}`.toLowerCase();
     return blob.includes(searchQuery);
   });
+}
+
+function loadShuffleRepeatFromStorage() {
+  shuffleOn = localStorage.getItem(SHUFFLE_KEY) === "1";
+  repeatOn = localStorage.getItem(REPEAT_KEY) === "1";
+  syncShuffleRepeatUi();
+}
+
+function syncShuffleRepeatUi() {
+  if (shuffleBtn) {
+    shuffleBtn.classList.toggle("is-active", shuffleOn);
+    shuffleBtn.setAttribute("aria-pressed", shuffleOn ? "true" : "false");
+  }
+  if (repeatBtn) {
+    repeatBtn.classList.toggle("is-active", repeatOn);
+    repeatBtn.setAttribute("aria-pressed", repeatOn ? "true" : "false");
+  }
+}
+
+function pickRandomQueueIndex(excludeIndex) {
+  if (!queue.length) return -1;
+  if (queue.length === 1) return 0;
+  let j = excludeIndex;
+  for (let t = 0; t < 24 && j === excludeIndex; t++) {
+    j = Math.floor(Math.random() * queue.length);
+  }
+  return j;
 }
 
 function getFavoriteIds() {
@@ -720,6 +793,7 @@ function formatTime(seconds) {
 }
 
 function syncSeekBarGradientPct() {
+  if (!seekBar) return;
   const max = Number(seekBar.max);
   const val = Number(seekBar.value);
   if (!Number.isFinite(max) || max <= 0) {
@@ -728,6 +802,40 @@ function syncSeekBarGradientPct() {
   }
   const pct = Math.min(100, Math.max(0, (val / max) * 100));
   seekBar.style.setProperty("--seek-pct", pct.toFixed(2));
+}
+
+function updatePlayerProgressLine() {
+  if (!playerProgressFill) return;
+  const duration = Number(audioPlayer.duration || 0);
+  const current = Number(audioPlayer.currentTime || 0);
+  const pct = duration > 0 ? Math.max(0, Math.min(100, (current / duration) * 100)) : 0;
+  playerProgressFill.style.setProperty("--player-progress-pct", `${pct.toFixed(3)}%`);
+}
+
+function updateProgressHintFromClientX(clientX, seek = false) {
+  if (!playerProgressLine) return;
+  const rect = playerProgressLine.getBoundingClientRect();
+  const duration = Number(audioPlayer.duration || 0);
+  if (!(duration > 0) || rect.width <= 0) {
+    if (playerProgressHint) {
+      playerProgressHint.textContent = "0:00";
+      playerProgressHint.style.left = "0px";
+    }
+    return;
+  }
+
+  const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+  const pct = x / rect.width;
+  const sec = pct * duration;
+
+  if (playerProgressHint) {
+    playerProgressHint.style.left = `${x}px`;
+    playerProgressHint.textContent = formatTime(sec);
+  }
+  if (seek) {
+    audioPlayer.currentTime = sec;
+    updatePlayerProgressLine();
+  }
 }
 
 function syncPasswordToggleUi() {
@@ -800,6 +908,7 @@ function resetAppAfterLogout() {
   setNowPlaying(null);
   setPlayButtonState(false);
   hideTrackMenu();
+  closeEqModal();
   closeTrackDetailsModal();
   hidePlaylistDetail();
   renderTracks();
@@ -837,6 +946,7 @@ async function bootstrapApp() {
   setPlayButtonState(false);
   updateVolume(30);
   syncSeekBarGradientPct();
+  loadShuffleRepeatFromStorage();
   setView("main", { scroll: false });
   initSmoothTrackListScroll(tracksList);
   initSmoothTrackListScroll(queueList);
@@ -1149,6 +1259,81 @@ const SECTION_TAB_HYSTERESIS_PX = 96;
 let viewScrollSyncSuppress = false;
 let viewScrollSuppressTimer = null;
 let sectionScrollRafId = 0;
+let scrollPerfTimer = null;
+let activeTiltTrack = null;
+let isProgressDragging = false;
+
+function markScrollingActive() {
+  document.body.classList.add("is-scrolling");
+  if (scrollPerfTimer) clearTimeout(scrollPerfTimer);
+  scrollPerfTimer = setTimeout(() => {
+    document.body.classList.remove("is-scrolling");
+    scrollPerfTimer = null;
+  }, 140);
+}
+
+function resetTrackTilt(el) {
+  if (!el) return;
+  el.style.setProperty("--tilt-x", "0deg");
+  el.style.setProperty("--tilt-y", "0deg");
+  el.style.setProperty("--tilt-lift", "0px");
+}
+
+function updateTrackTiltFromMouse(event) {
+  const track = event.target instanceof Element ? event.target.closest(".track-item") : null;
+  if (!track) {
+    if (activeTiltTrack) {
+      resetTrackTilt(activeTiltTrack);
+      activeTiltTrack = null;
+    }
+    return;
+  }
+  if (document.body.classList.contains("is-scrolling")) {
+    resetTrackTilt(track);
+    return;
+  }
+
+  if (activeTiltTrack && activeTiltTrack !== track) resetTrackTilt(activeTiltTrack);
+  activeTiltTrack = track;
+
+  const rect = track.getBoundingClientRect();
+  const px = (event.clientX - rect.left) / Math.max(1, rect.width);
+  const py = (event.clientY - rect.top) / Math.max(1, rect.height);
+  const nx = Math.max(-0.5, Math.min(0.5, px - 0.5));
+  const ny = Math.max(-0.5, Math.min(0.5, py - 0.5));
+  const max = 10.5;
+
+  track.style.setProperty("--tilt-y", `${(nx * max * 2).toFixed(2)}deg`);
+  track.style.setProperty("--tilt-x", `${(-ny * max * 2).toFixed(2)}deg`);
+  track.style.setProperty("--tilt-lift", "-3px");
+}
+
+function resetPlaylistTilt(el) {
+  if (!el) return;
+  el.style.setProperty("--ptilt-x", "0deg");
+  el.style.setProperty("--ptilt-y", "0deg");
+  el.style.setProperty("--ptilt-lift", "0px");
+}
+
+function updatePlaylistTiltFromMouse(event) {
+  const card = event.target instanceof Element ? event.target.closest(".playlist-card") : null;
+  if (!card) return;
+  if (document.body.classList.contains("is-scrolling")) {
+    resetPlaylistTilt(card);
+    return;
+  }
+
+  const rect = card.getBoundingClientRect();
+  const px = (event.clientX - rect.left) / Math.max(1, rect.width);
+  const py = (event.clientY - rect.top) / Math.max(1, rect.height);
+  const nx = Math.max(-0.5, Math.min(0.5, px - 0.5));
+  const ny = Math.max(-0.5, Math.min(0.5, py - 0.5));
+  const max = 8;
+
+  card.style.setProperty("--ptilt-y", `${(nx * max * 2).toFixed(2)}deg`);
+  card.style.setProperty("--ptilt-x", `${(-ny * max * 2).toFixed(2)}deg`);
+  card.style.setProperty("--ptilt-lift", "-2px");
+}
 
 function getViewportScrollTop() {
   return window.scrollY ?? window.pageYOffset ?? document.documentElement.scrollTop ?? 0;
@@ -1237,7 +1422,7 @@ function scrollPageToView(viewName, behavior) {
   else if (viewName === "settings") el = settingsView;
   if (!el) return;
   const target = getModuleTargetScrollTop(el);
-  scrollRootSmoothTo(target, 520, behavior);
+  scrollRootSmoothTo(target, 220, behavior);
 }
 
 function getModuleDocumentTop(el) {
@@ -1289,13 +1474,13 @@ function syncCategoryFromPageScroll() {
 }
 
 function setView(viewName, options = {}) {
-  const { scroll = true, behavior = "smooth" } = options;
+  const { scroll = true, behavior = "auto" } = options;
   currentView = viewName;
   if (viewName !== "playlists") hidePlaylistDetail();
   categoryItems.forEach((item) => item.classList.toggle("is-active", item.dataset.view === viewName));
 
   if (scroll && mainView && likesView && playlistsView && settingsView) {
-    const ms = behavior === "auto" ? 120 : 650;
+    const ms = behavior === "auto" ? 80 : 260;
     suppressViewScrollSync(ms);
     requestAnimationFrame(() => scrollPageToView(viewName, behavior));
   }
@@ -1323,9 +1508,15 @@ function playQueueIndex(index) {
 
 function playNext() {
   if (!queue.length) return;
+  if (shuffleOn) {
+    playQueueIndex(pickRandomQueueIndex(currentQueueIndex));
+    return;
+  }
   const nextIndex = currentQueueIndex + 1;
   if (nextIndex < queue.length) {
     playQueueIndex(nextIndex);
+  } else if (repeatOn) {
+    playQueueIndex(0);
   } else {
     currentQueueIndex = -1;
     selectedTrackId = null;
@@ -1449,9 +1640,6 @@ themeToggleBtn.addEventListener("click", () => {
 
 searchInput.addEventListener("input", () => {
   searchQuery = searchInput.value.trim().toLowerCase();
-  searchInput.classList.add("is-typing");
-  if (typingTimer) clearTimeout(typingTimer);
-  typingTimer = setTimeout(() => searchInput.classList.remove("is-typing"), 260);
   renderTracks();
 });
 
@@ -1596,9 +1784,17 @@ volumeBtn.addEventListener("click", (event) => {
   volumePanel.setAttribute("aria-hidden", volumePanel.classList.contains("open") ? "false" : "true");
 });
 
+if (eqBtn) {
+  eqBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openEqModal();
+  });
+}
+
 volumePanel.addEventListener("click", (event) => {
   event.stopPropagation();
 });
+if (eqModal) eqModal.addEventListener("click", (event) => event.stopPropagation());
 
 volumeRange.addEventListener("input", () => {
   updateVolume(volumeRange.value);
@@ -1609,6 +1805,39 @@ document.addEventListener("click", () => {
   volumePanel.setAttribute("aria-hidden", "true");
   hideTrackMenu();
 });
+
+if (eqBackdrop) eqBackdrop.addEventListener("click", closeEqModal);
+if (eqClose) eqClose.addEventListener("click", closeEqModal);
+
+if (eqPresetSelect) {
+  eqPresetSelect.addEventListener("change", () => {
+    const v = eqPresetSelect.value;
+    const preset = EQ_PRESETS[v];
+    if (!preset) return;
+    eqGains = preset.slice();
+    renderEqBands();
+    applyEqState();
+  });
+}
+
+if (eqEnabledToggle) {
+  eqEnabledToggle.addEventListener("change", () => {
+    eqEnabled = !!eqEnabledToggle.checked;
+    applyEqState();
+  });
+}
+
+if (eqBands) {
+  eqBands.addEventListener("input", (event) => {
+    const input = event.target.closest("[data-eq-band]");
+    if (!input) return;
+    const idx = Number(input.getAttribute("data-eq-band"));
+    if (!Number.isFinite(idx) || idx < 0 || idx >= eqGains.length) return;
+    eqGains[idx] = Number(input.value);
+    if (eqPresetSelect) eqPresetSelect.value = "custom";
+    applyEqState();
+  });
+}
 
 trackMenu.addEventListener("click", (event) => event.stopPropagation());
 
@@ -1634,6 +1863,10 @@ if (trackDetailsOk) {
 
 window.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (eqModal && !eqModal.classList.contains("is-hidden")) {
+    closeEqModal();
+    return;
+  }
   if (!trackDetailsModal || trackDetailsModal.classList.contains("is-hidden")) return;
   closeTrackDetailsModal();
 });
@@ -1664,14 +1897,31 @@ menuDeleteTrack.addEventListener("click", () => {
 categoryItems.forEach((item) => {
   item.addEventListener("click", () => {
     const view = item.dataset.view || "main";
-    setView(view, { behavior: "smooth" });
+    setView(view, { behavior: "auto" });
   });
 });
 
 window.addEventListener(
   "scroll",
   () => {
+    markScrollingActive();
     requestAnimationFrame(syncCategoryFromPageScroll);
+  },
+  { passive: true }
+);
+
+window.addEventListener(
+  "wheel",
+  () => {
+    markScrollingActive();
+  },
+  { passive: true }
+);
+
+window.addEventListener(
+  "touchmove",
+  () => {
+    markScrollingActive();
   },
   { passive: true }
 );
@@ -1739,22 +1989,79 @@ playlistsGrid.addEventListener("click", (event) => {
 nextBtn.addEventListener("click", playNext);
 prevBtn.addEventListener("click", playPrevious);
 
+if (shuffleBtn) {
+  shuffleBtn.addEventListener("click", () => {
+    shuffleOn = !shuffleOn;
+    localStorage.setItem(SHUFFLE_KEY, shuffleOn ? "1" : "0");
+    syncShuffleRepeatUi();
+  });
+}
+if (repeatBtn) {
+  repeatBtn.addEventListener("click", () => {
+    repeatOn = !repeatOn;
+    localStorage.setItem(REPEAT_KEY, repeatOn ? "1" : "0");
+    syncShuffleRepeatUi();
+  });
+}
+
 audioPlayer.addEventListener("loadedmetadata", () => {
-  seekBar.max = Math.floor(audioPlayer.duration || 0);
-  totalTime.textContent = formatTime(audioPlayer.duration || 0);
+  if (seekBar) seekBar.max = Math.floor(audioPlayer.duration || 0);
+  if (totalTime) totalTime.textContent = formatTime(audioPlayer.duration || 0);
   syncSeekBarGradientPct();
+  updatePlayerProgressLine();
 });
 
 audioPlayer.addEventListener("timeupdate", () => {
-  seekBar.value = Math.floor(audioPlayer.currentTime || 0);
-  currentTime.textContent = formatTime(audioPlayer.currentTime || 0);
+  if (seekBar) seekBar.value = Math.floor(audioPlayer.currentTime || 0);
+  if (currentTime) currentTime.textContent = formatTime(audioPlayer.currentTime || 0);
   syncSeekBarGradientPct();
+  updatePlayerProgressLine();
 });
 
-seekBar.addEventListener("input", () => {
-  audioPlayer.currentTime = Number(seekBar.value);
-  syncSeekBarGradientPct();
-});
+if (seekBar) {
+  seekBar.addEventListener("input", () => {
+    audioPlayer.currentTime = Number(seekBar.value);
+    syncSeekBarGradientPct();
+    updatePlayerProgressLine();
+  });
+}
+
+if (playerProgressLine) {
+  playerProgressLine.addEventListener("pointerenter", (event) => {
+    playerProgressLine.classList.add("is-hovered");
+    updateProgressHintFromClientX(event.clientX, false);
+  });
+
+  playerProgressLine.addEventListener("pointermove", (event) => {
+    updateProgressHintFromClientX(event.clientX, isProgressDragging);
+  });
+
+  playerProgressLine.addEventListener("pointerleave", () => {
+    if (!isProgressDragging) playerProgressLine.classList.remove("is-hovered");
+  });
+
+  playerProgressLine.addEventListener("pointerdown", (event) => {
+    isProgressDragging = true;
+    playerProgressLine.classList.add("is-dragging");
+    playerProgressLine.classList.add("is-hovered");
+    playerProgressLine.setPointerCapture?.(event.pointerId);
+    updateProgressHintFromClientX(event.clientX, true);
+  });
+
+  playerProgressLine.addEventListener("pointerup", (event) => {
+    if (!isProgressDragging) return;
+    updateProgressHintFromClientX(event.clientX, true);
+    isProgressDragging = false;
+    playerProgressLine.classList.remove("is-dragging");
+    playerProgressLine.releasePointerCapture?.(event.pointerId);
+  });
+
+  playerProgressLine.addEventListener("pointercancel", () => {
+    isProgressDragging = false;
+    playerProgressLine.classList.remove("is-dragging");
+    playerProgressLine.classList.remove("is-hovered");
+  });
+}
 
 audioPlayer.addEventListener("ended", () => {
   playNext();
@@ -1881,11 +2188,16 @@ if (logoutBtn) {
 
 window.addEventListener("DOMContentLoaded", async () => {
   applyTheme(localStorage.getItem("sapphire_theme") || "dark");
+  loadShuffleRepeatFromStorage();
   loadTrackHighlight();
   loadPlayerGlow();
   loadTopbarGlow();
   loadTopbarOutline();
   loadTrackBeatGlow();
+  eqGains = EQ_FREQS.map(() => 0);
+  renderEqBands();
+  if (eqEnabledToggle) eqEnabledToggle.checked = true;
+  if (eqPresetSelect) eqPresetSelect.value = "custom";
 
   let sessionData = { authenticated: false };
   try {
@@ -1907,7 +2219,16 @@ window.addEventListener("DOMContentLoaded", async () => {
 });
 
 window.addEventListener("mousemove", (event) => {
+  updateTrackTiltFromMouse(event);
+  updatePlaylistTiltFromMouse(event);
   updateProximityGlow(event.clientX, event.clientY);
+});
+
+window.addEventListener("mouseleave", () => {
+  if (!activeTiltTrack) return;
+  resetTrackTilt(activeTiltTrack);
+  activeTiltTrack = null;
+  document.querySelectorAll(".playlist-card").forEach((card) => resetPlaylistTilt(card));
 });
 
 window.addEventListener("DOMContentLoaded", () => {

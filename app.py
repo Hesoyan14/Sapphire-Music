@@ -121,8 +121,8 @@ def parse_filename_metadata(original_name: str):
     stem = Path(original_name).stem
     if " - " in stem:
         artist, title = stem.split(" - ", 1)
-        return title.strip() or stem, artist.strip() or "Неизвестный чел"
-    return stem, "Неизвестный чел"
+        return title.strip() or stem, artist.strip() or "No name"
+    return stem, "No name"
 
 
 def normalize_tag_value(value):
@@ -709,13 +709,22 @@ def ensure_user_library_link(user_id: int, track_id: str):
 
 
 def ensure_bootstrap_user():
-    if User.query.count() > 0:
-        return
-    name = os.environ.get("SAPPHIRE_BOOTSTRAP_USERNAME", "admin")
-    pwd = os.environ.get("SAPPHIRE_BOOTSTRAP_PASSWORD", "admin")
-    user = User(username=name, password_hash=generate_password_hash(pwd))
-    db.session.add(user)
-    db.session.commit()
+    changed = False
+
+    # Keep existing admin as-is; create only if missing.
+    admin_name = os.environ.get("SAPPHIRE_BOOTSTRAP_USERNAME", "admin")
+    admin_pwd = os.environ.get("SAPPHIRE_BOOTSTRAP_PASSWORD", "admin")
+    if not User.query.filter_by(username=admin_name).first():
+        db.session.add(User(username=admin_name, password_hash=generate_password_hash(admin_pwd)))
+        changed = True
+
+    # Secondary fixed account for limited usage.
+    if not User.query.filter_by(username="user").first():
+        db.session.add(User(username="user", password_hash=generate_password_hash("user")))
+        changed = True
+
+    if changed:
+        db.session.commit()
 
 
 def migrate_legacy_json():
@@ -1058,6 +1067,8 @@ def upload():
     uid = get_current_user_id()
     if uid is None:
         return jsonify({"error": "Unauthorized"}), 401
+    if (session.get("username") or "").strip().lower() == "user":
+        return jsonify({"error": "У пользователя 'user' нет прав на загрузку треков"}), 403
 
     if "file" not in request.files:
         return jsonify({"error": "No file part in request"}), 400

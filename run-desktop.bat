@@ -8,20 +8,8 @@ set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
 set "PIP_MARKER=%VENV_DIR%\.deps_installed"
 
 echo [Sapphire] Preparing desktop environment...
-
-where py >nul 2>nul
+call :ensure_python_312
 if errorlevel 1 (
-  echo [ERROR] Python launcher ^(py^) not found.
-  echo Install Python 3.12 from https://www.python.org/downloads/
-  echo and enable "Add python.exe to PATH".
-  pause
-  exit /b 1
-)
-
-py -3.12 -c "import sys; print(sys.version)" >nul 2>nul
-if errorlevel 1 (
-  echo [ERROR] Python 3.12 is not installed.
-  echo Install Python 3.12 and run this file again.
   pause
   exit /b 1
 )
@@ -69,3 +57,44 @@ if not "%APP_EXIT%"=="0" (
 )
 
 endlocal & exit /b %APP_EXIT%
+
+:ensure_python_312
+where py >nul 2>nul
+if errorlevel 1 goto :install_python_312
+
+py -3.12 -c "import sys; print(sys.version)" >nul 2>nul
+if not errorlevel 1 exit /b 0
+
+:install_python_312
+echo [INFO] Python 3.12 not found. Trying automatic install via winget...
+where winget >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] winget is not available on this system.
+  echo Install Python 3.12 manually:
+  echo https://www.python.org/downloads/release/python-31210/
+  echo During install, enable "Add python.exe to PATH".
+  exit /b 1
+)
+
+winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements --silent
+if errorlevel 1 (
+  echo [ERROR] Automatic Python install failed.
+  echo Install Python 3.12 manually:
+  echo https://www.python.org/downloads/release/python-31210/
+  echo During install, enable "Add python.exe to PATH".
+  exit /b 1
+)
+
+REM Refresh current shell PATH from machine and user scopes.
+for /f "tokens=2,*" %%A in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul ^| findstr /i "Path"') do set "MACHINE_PATH=%%B"
+for /f "tokens=2,*" %%A in ('reg query "HKCU\Environment" /v Path 2^>nul ^| findstr /i "Path"') do set "USER_PATH=%%B"
+if defined MACHINE_PATH set "PATH=%MACHINE_PATH%"
+if defined USER_PATH set "PATH=%PATH%;%USER_PATH%"
+
+py -3.12 -c "import sys; print(sys.version)" >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Python 3.12 was installed, but py -3.12 is still unavailable.
+  echo Close this window and run run-desktop.bat again.
+  exit /b 1
+)
+exit /b 0

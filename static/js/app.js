@@ -82,6 +82,7 @@ let searchQuery = "";
 let searchRawQuery = "";
 let catalogTracks = [];
 let catalogSearchReqId = 0;
+let currentUsername = "";
 let shuffleOn = false;
 let repeatOn = false;
 let activeTrackMenuId = null;
@@ -697,6 +698,11 @@ function reorderQueueByIds(sourceId, targetId, insertAfter) {
 }
 
 async function persistQueueOrder() {
+  if (queue.some((item) => item.is_local_only)) {
+    localStorage.setItem("music_queue", JSON.stringify(queue));
+    renderQueue();
+    return;
+  }
   const response = await fetch("/queue", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -914,6 +920,62 @@ function setSidebarUser(username) {
   avEl.textContent = name.charAt(0).toUpperCase();
 }
 
+function isLimitedLocalUser() {
+  return String(currentUsername || "").trim().toLowerCase() === "user";
+}
+
+function parseLocalTrackMeta(file) {
+  const original = String(file?.name || "track.mp3");
+  const stem = original.replace(/\.[^/.]+$/, "");
+  let title = stem || "Local track";
+  let artist = "Local file";
+  if (stem.includes(" - ")) {
+    const parts = stem.split(" - ");
+    if (parts.length >= 2) {
+      artist = (parts.shift() || "").trim() || artist;
+      title = parts.join(" - ").trim() || title;
+    }
+  }
+  return { title, artist, original };
+}
+
+function probeAudioDuration(blobUrl) {
+  return new Promise((resolve) => {
+    const probe = new Audio();
+    const done = (v) => {
+      probe.src = "";
+      resolve(v);
+    };
+    probe.preload = "metadata";
+    probe.onloadedmetadata = () => done(Number.isFinite(probe.duration) ? Math.floor(probe.duration) : 0);
+    probe.onerror = () => done(0);
+    probe.src = blobUrl;
+  });
+}
+
+async function addLocalTrackForLimitedUser(file) {
+  const blobUrl = URL.createObjectURL(file);
+  const duration = await probeAudioDuration(blobUrl);
+  const meta = parseLocalTrackMeta(file);
+  const id = `local_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const track = {
+    id,
+    filename: file.name,
+    original_filename: meta.original,
+    title: meta.title,
+    artist: meta.artist,
+    duration,
+    duration_label: formatTime(duration),
+    audio_url: blobUrl,
+    cover_url: "",
+    is_local_only: true,
+  };
+  tracks.unshift(track);
+  renderTracks();
+  renderLikes();
+  return track;
+}
+
 function showAuthModal() {
   if (!authModal) return;
   authModal.classList.remove("is-hidden");
@@ -949,6 +1011,7 @@ function resetAppAfterLogout() {
   tracks = [];
   queue = [];
   playlists = [];
+  currentUsername = "";
   currentQueueIndex = -1;
   selectedTrackId = null;
   try {
@@ -1030,6 +1093,17 @@ async function fetchPlaylists() {
 }
 
 async function addToQueue(trackId) {
+  const localTrack = tracks.find((t) => t.id === trackId && t.is_local_only);
+  if (localTrack) {
+    const item = {
+      ...localTrack,
+      queue_item_id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`,
+    };
+    queue.push(item);
+    localStorage.setItem("music_queue", JSON.stringify(queue));
+    renderQueue();
+    return;
+  }
   const response = await fetch("/queue", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1041,6 +1115,14 @@ async function addToQueue(trackId) {
 }
 
 async function removeFromQueue(queueItemId) {
+  const localQueueItem = queue.find((q) => q.queue_item_id === queueItemId && q.is_local_only);
+  if (localQueueItem) {
+    queue = queue.filter((q) => q.queue_item_id !== queueItemId);
+    localStorage.setItem("music_queue", JSON.stringify(queue));
+    if (currentQueueIndex >= queue.length) currentQueueIndex = queue.length - 1;
+    renderQueue();
+    return;
+  }
   const response = await fetch("/queue", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1053,6 +1135,29 @@ async function removeFromQueue(queueItemId) {
 }
 
 async function deleteTrack(trackId) {
+  const localTrack = tracks.find((t) => t.id === trackId && t.is_local_only);
+  if (localTrack) {
+    if (localTrack.audio_url && localTrack.audio_url.startsWith("blob:")) {
+      URL.revokeObjectURL(localTrack.audio_url);
+    }
+    tracks = tracks.filter((t) => t.id !== trackId);
+    queue = queue.filter((q) => q.id !== trackId);
+    removeTrackFromFavorites(trackId);
+    if (selectedTrackId === trackId) {
+      audioPlayer.pause();
+      audioPlayer.removeAttribute("src");
+      audioPlayer.load();
+      currentQueueIndex = -1;
+      selectedTrackId = null;
+      setNowPlaying(null);
+      setPlayButtonState(false);
+    }
+    localStorage.setItem("music_queue", JSON.stringify(queue));
+    renderTracks();
+    renderQueue();
+    renderLikes();
+    return;
+  }
   const response = await fetch(`/tracks/${trackId}`, { method: "DELETE" });
   const payload = await response.json();
   if (!response.ok) {
@@ -1615,6 +1720,10 @@ function isAllowedUploadFile(file) {
 }
 
 async function uploadAudioFile(file) {
+  if (isLimitedLocalUser()) {
+    await addLocalTrackForLimitedUser(file);
+    return { ok: true, localOnly: true };
+  }
   const formData = new FormData();
   formData.append("file", file);
   try {
@@ -1631,7 +1740,7 @@ async function uploadAudioFile(file) {
     if (!response.ok) {
       return { ok: false, error: payload.error || "Не удалось загрузить файл" };
     }
-    return { ok: true };
+    return { ok: true, localOnly: false };
   } catch (_err) {
     return { ok: false, error: "Сеть недоступна или сервер не отвечает" };
   }
@@ -1653,7 +1762,9 @@ uploadForm.addEventListener("submit", async (event) => {
   }
 
   fileInput.value = "";
-  await fetchTracks();
+  if (!result.localOnly) {
+    await fetchTracks();
+  }
 });
 
 window.addEventListener("dragover", (event) => {
@@ -1686,12 +1797,19 @@ window.addEventListener("drop", async (event) => {
   event.preventDefault();
 
   const errors = [];
+  let hasServerUpload = false;
   for (const file of audioFiles) {
     const result = await uploadAudioFile(file);
     if (!result.ok) errors.push(`${file.name}: ${result.error}`);
+    if (result.ok && !result.localOnly) hasServerUpload = true;
   }
   if (errors.length) alert(errors.join("\n"));
-  await fetchTracks();
+  if (hasServerUpload) {
+    await fetchTracks();
+  } else {
+    renderTracks();
+    renderLikes();
+  }
 });
 
 uploadIconBtn.addEventListener("click", () => {
@@ -2247,6 +2365,7 @@ if (authForm && loginSubmit) {
         loginPasswordToggle.title = "Показать пароль";
       }
       setSidebarUser(data.username || "");
+      currentUsername = data.username || "";
       await bootstrapApp();
     } finally {
       loginSubmit.disabled = false;
@@ -2291,6 +2410,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (sessionData.authenticated) {
     hideAuthModal();
     setSidebarUser(sessionData.username || "");
+    currentUsername = sessionData.username || "";
     await bootstrapApp();
   } else {
     setSidebarUser("");

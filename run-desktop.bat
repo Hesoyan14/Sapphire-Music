@@ -5,6 +5,7 @@ cd /d "%~dp0"
 
 set "VENV_DIR=.venv312"
 set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
+set "CLOUD_URL=https://sapphire-music.onrender.com"
 
 echo [Sapphire] Preparing desktop environment...
 call :ensure_python_312
@@ -43,13 +44,14 @@ if errorlevel 1 (
   echo [3/4] Dependencies are ready.
 )
 
-echo [4/4] Starting desktop app...
-"%VENV_PY%" desktop.py
+echo [4/4] Starting cloud desktop app...
+echo [INFO] Opening %CLOUD_URL%
+"%VENV_PY%" -c "import webview; webview.create_window('Sapphire', r'%CLOUD_URL%', width=1280, height=800); webview.start()"
 set "APP_EXIT=%ERRORLEVEL%"
 
 if not "%APP_EXIT%"=="0" (
   echo.
-  echo [ERROR] desktop.py exited with code %APP_EXIT%.
+  echo [ERROR] Cloud desktop launcher exited with code %APP_EXIT%.
   pause
 )
 

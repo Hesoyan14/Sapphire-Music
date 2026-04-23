@@ -20,7 +20,7 @@ from sqlalchemy.engine import Engine
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
-from models import QueueItem, Playlist, PlaylistTrack, Track, User, db
+from models import QueueItem, Playlist, PlaylistTrack, Track, User, UserLibraryTrack, db
 from storage_backend import delete_audio_file, presigned_audio_url, save_upload_stream, s3_configured
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -687,6 +687,27 @@ def queue_rows_for_user(user_id: int):
     return out
 
 
+def user_has_track(user_id: int, track_id: str) -> bool:
+    return (
+        UserLibraryTrack.query.filter_by(user_id=user_id, track_id=track_id).first()
+        is not None
+    )
+
+
+def user_track_query(user_id: int):
+    return (
+        Track.query.join(
+            UserLibraryTrack,
+            UserLibraryTrack.track_id == Track.id,
+        ).filter(UserLibraryTrack.user_id == user_id)
+    )
+
+
+def ensure_user_library_link(user_id: int, track_id: str):
+    if not UserLibraryTrack.query.filter_by(user_id=user_id, track_id=track_id).first():
+        db.session.add(UserLibraryTrack(user_id=user_id, track_id=track_id))
+
+
 def ensure_bootstrap_user():
     if User.query.count() > 0:
         return
@@ -745,6 +766,8 @@ def migrate_legacy_json():
                 cover_url=item.get("cover_url") or None,
             )
             db.session.add(tr)
+            db.session.flush()
+            ensure_user_library_link(user.id, tr.id)
 
     db.session.flush()
 
@@ -780,10 +803,25 @@ def migrate_legacy_json():
     marker.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
 
 
+def ensure_existing_track_links():
+    """Гарантирует, что старые треки связаны с библиотекой владельца."""
+    changed = False
+    rows = Track.query.with_entities(Track.id, Track.owner_id).all()
+    for track_id, owner_id in rows:
+        if owner_id is None:
+            continue
+        if not UserLibraryTrack.query.filter_by(user_id=owner_id, track_id=track_id).first():
+            db.session.add(UserLibraryTrack(user_id=owner_id, track_id=track_id))
+            changed = True
+    if changed:
+        db.session.commit()
+
+
 with app.app_context():
     db.create_all()
     ensure_bootstrap_user()
     migrate_legacy_json()
+    ensure_existing_track_links()
 
 
 @app.before_request
@@ -938,7 +976,7 @@ def tracks():
     if uid is None:
         return jsonify({"error": "Unauthorized"}), 401
 
-    rows = Track.query.filter_by(owner_id=uid).order_by(Track.original_filename.asc()).all()
+    rows = user_track_query(uid).order_by(Track.original_filename.asc()).all()
     changed = False
     cover_attempts = 0
     max_cover_attempts = 1
@@ -984,16 +1022,31 @@ def delete_track(track_id):
     if uid is None:
         return jsonify({"error": "Unauthorized"}), 401
 
-    track = Track.query.filter_by(id=track_id, owner_id=uid).first()
-    if not track:
+    track = Track.query.filter_by(id=track_id).first()
+    if not track or not user_has_track(uid, track_id):
         return jsonify({"error": "Track not found"}), 404
 
+    # Удаляем трек только из текущей библиотеки пользователя.
+    UserLibraryTrack.query.filter_by(user_id=uid, track_id=track_id).delete()
+    QueueItem.query.filter_by(user_id=uid, track_id=track_id).delete()
+    owned_playlist_ids = [p.id for p in Playlist.query.filter_by(owner_id=uid).all()]
+    if owned_playlist_ids:
+        PlaylistTrack.query.filter(
+            PlaylistTrack.playlist_id.in_(owned_playlist_ids),
+            PlaylistTrack.track_id == track_id,
+        ).delete(synchronize_session=False)
+
+    # Если никто больше не держит трек в библиотеке — удаляем файл и запись трека.
+    has_other_links = (
+        UserLibraryTrack.query.filter_by(track_id=track_id).first() is not None
+    )
     fn = track.filename
     sk = track.storage_key
-    db.session.delete(track)
-    db.session.commit()
+    if not has_other_links:
+        db.session.delete(track)
+        delete_audio_file(fn, sk, UPLOAD_DIR)
 
-    delete_audio_file(fn, sk, UPLOAD_DIR)
+    db.session.commit()
 
     q_updated = queue_rows_for_user(uid)
     playlists_out = [playlist_to_dict(p) for p in Playlist.query.filter_by(owner_id=uid).all()]
@@ -1048,8 +1101,57 @@ def upload():
         cover_url=cover or None,
     )
     db.session.add(track)
+    ensure_user_library_link(uid, track_id)
     db.session.commit()
     return jsonify(track_to_dict(track)), 201
+
+
+@app.route("/tracks/catalog", methods=["GET"])
+def tracks_catalog():
+    uid = get_current_user_id()
+    if uid is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    q = (request.args.get("q") or "").strip().lower()
+    if len(q) < 2:
+        return jsonify([])
+
+    library_track_ids = {
+        row.track_id for row in UserLibraryTrack.query.filter_by(user_id=uid).all()
+    }
+    all_rows = (
+        Track.query.order_by(Track.title.asc(), Track.artist.asc())
+        .limit(400)
+        .all()
+    )
+    out = []
+    for t in all_rows:
+        if t.id in library_track_ids:
+            continue
+        blob = f"{t.title} {t.artist} {t.original_filename or ''}".lower()
+        if q in blob:
+            out.append(track_to_dict(t))
+        if len(out) >= 30:
+            break
+    return jsonify(out)
+
+
+@app.route("/tracks/library/add", methods=["POST"])
+def add_track_to_library():
+    uid = get_current_user_id()
+    if uid is None:
+        return jsonify({"error": "Unauthorized"}), 401
+    payload = request.get_json(silent=True) or {}
+    track_id = str(payload.get("track_id") or "").strip()
+    if not track_id:
+        return jsonify({"error": "track_id is required"}), 400
+
+    track = Track.query.filter_by(id=track_id).first()
+    if not track:
+        return jsonify({"error": "Track not found"}), 404
+    ensure_user_library_link(uid, track_id)
+    db.session.commit()
+    return jsonify(track_to_dict(track)), 200
 
 
 @app.route("/queue", methods=["GET", "POST"])
@@ -1066,7 +1168,9 @@ def queue():
     track_id = payload.get("track_id")
 
     if action == "add":
-        track = Track.query.filter_by(id=track_id, owner_id=uid).first()
+        track = Track.query.filter_by(id=track_id).first()
+        if track and not user_has_track(uid, track_id):
+            track = None
         if not track:
             return jsonify({"error": "Track not found"}), 404
         max_pos = db.session.query(func.max(QueueItem.position)).filter_by(user_id=uid).scalar()
@@ -1094,7 +1198,7 @@ def queue():
             if not isinstance(item, dict) or not item.get("id"):
                 continue
             tid = item["id"]
-            if not Track.query.filter_by(id=tid, owner_id=uid).first():
+            if not user_has_track(uid, tid):
                 continue
             qid = item.get("queue_item_id") or uuid.uuid4().hex
             db.session.add(QueueItem(user_id=uid, queue_item_id=qid, track_id=tid, position=pos))
@@ -1160,7 +1264,9 @@ def add_track_to_playlist(playlist_id):
     if not track_id:
         return jsonify({"error": "track_id is required"}), 400
 
-    track = Track.query.filter_by(id=track_id, owner_id=uid).first()
+    track = Track.query.filter_by(id=track_id).first()
+    if track and not user_has_track(uid, track_id):
+        track = None
     if not track:
         return jsonify({"error": "Track not found"}), 404
 
@@ -1215,7 +1321,7 @@ def audio(filename):
 
     safe_name = os.path.basename(filename)
     track = Track.query.filter_by(filename=safe_name).first()
-    if not track or track.owner_id != uid:
+    if not track or not user_has_track(uid, track.id):
         return jsonify({"error": "File not found"}), 404
 
     url = presigned_audio_url(track.storage_key)

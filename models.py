@@ -37,6 +37,7 @@ class Track(db.Model):
     cover_url = db.Column(db.Text, nullable=True)
 
     owner = db.relationship("User", back_populates="tracks")
+    library_links = db.relationship("UserLibraryTrack", back_populates="track", cascade="all, delete-orphan")
     playlist_links = db.relationship("PlaylistTrack", back_populates="track", cascade="all, delete-orphan")
     queue_refs = db.relationship("QueueItem", back_populates="track", cascade="all, delete-orphan")
 
@@ -83,3 +84,17 @@ class QueueItem(db.Model):
 
     user = db.relationship("User", back_populates="queue_items")
     track = db.relationship("Track", back_populates="queue_refs")
+
+
+class UserLibraryTrack(db.Model):
+    __tablename__ = "user_library_tracks"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    track_id = db.Column(db.String(40), db.ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False, index=True)
+    added_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    user = db.relationship("User")
+    track = db.relationship("Track", back_populates="library_links")
+
+    __table_args__ = (UniqueConstraint("user_id", "track_id", name="uq_user_library_track"),)

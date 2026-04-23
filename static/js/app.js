@@ -79,6 +79,9 @@ let playlists = [];
 let currentQueueIndex = -1;
 let selectedTrackId = null;
 let searchQuery = "";
+let searchRawQuery = "";
+let catalogTracks = [];
+let catalogSearchReqId = 0;
 let shuffleOn = false;
 let repeatOn = false;
 let activeTrackMenuId = null;
@@ -429,6 +432,27 @@ function filteredTracks() {
   });
 }
 
+async function refreshCatalogSearch() {
+  const term = (searchRawQuery || "").trim();
+  const requestId = ++catalogSearchReqId;
+  if (term.length < 2) {
+    catalogTracks = [];
+    renderTracks();
+    return;
+  }
+  try {
+    const response = await fetch(`/tracks/catalog?q=${encodeURIComponent(term)}`);
+    const payload = response.ok ? await response.json() : [];
+    if (requestId !== catalogSearchReqId) return;
+    catalogTracks = Array.isArray(payload) ? payload : [];
+    renderTracks();
+  } catch (_e) {
+    if (requestId !== catalogSearchReqId) return;
+    catalogTracks = [];
+    renderTracks();
+  }
+}
+
 function loadShuffleRepeatFromStorage() {
   shuffleOn = localStorage.getItem(SHUFFLE_KEY) === "1";
   repeatOn = localStorage.getItem(REPEAT_KEY) === "1";
@@ -495,8 +519,9 @@ function removeTrackFromFavorites(trackId) {
 function renderTracks() {
   tracksList.innerHTML = "";
   const visibleTracks = filteredTracks();
-  if (!visibleTracks.length) {
-    tracksList.innerHTML = `<div class="meta">${tracks.length ? "Nothing found for this query." : "No tracks uploaded yet."}</div>`;
+  const hasCatalog = searchRawQuery.trim().length >= 2 && catalogTracks.length > 0;
+  if (!visibleTracks.length && !hasCatalog) {
+    tracksList.innerHTML = `<div class="meta">${tracks.length ? "Nothing found for this query." : "No tracks in your library yet."}</div>`;
     onUiUpdated();
     return;
   }
@@ -536,6 +561,34 @@ function renderTracks() {
     `;
     tracksList.appendChild(row);
   });
+
+  if (hasCatalog) {
+    const title = document.createElement("div");
+    title.className = "meta";
+    title.style.marginTop = visibleTracks.length ? "10px" : "0";
+    title.textContent = "Found on server (add to your library):";
+    tracksList.appendChild(title);
+
+    catalogTracks.forEach((track) => {
+      const row = document.createElement("div");
+      row.className = "track-item cursor-reactive";
+      row.innerHTML = `
+        <img class="track-cover" src="${track.cover_url || FALLBACK_COVER}" alt="" loading="lazy" onerror="this.src='${FALLBACK_COVER}'" />
+        <div class="track-main">
+          <div class="track-title-line">
+            <span class="title">${track.title}</span>
+          </div>
+          <div class="track-meta-line">
+            <span class="meta">${track.artist} • ${track.duration_label || "—"}</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button type="button" class="ghost icon-btn cursor-reactive" data-add-catalog-track="${track.id}" title="Добавить в библиотеку" aria-label="Добавить в библиотеку">+</button>
+        </div>
+      `;
+      tracksList.appendChild(row);
+    });
+  }
   onUiUpdated();
 }
 
@@ -959,6 +1012,9 @@ async function fetchTracks() {
   tracks = await response.json();
   renderTracks();
   renderLikes();
+  if ((searchRawQuery || "").trim().length >= 2) {
+    void refreshCatalogSearch();
+  }
 }
 
 async function fetchQueue() {
@@ -1026,6 +1082,21 @@ async function deleteTrack(trackId) {
   await fetchTracks();
   renderQueue();
   renderPlaylists();
+}
+
+async function addCatalogTrackToLibrary(trackId) {
+  const response = await fetch("/tracks/library/add", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ track_id: trackId }),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    alert(payload.error || "Failed to add track");
+    return;
+  }
+  await fetchTracks();
+  await refreshCatalogSearch();
 }
 
 async function createPlaylist() {
@@ -1639,11 +1710,21 @@ themeToggleBtn.addEventListener("click", () => {
 });
 
 searchInput.addEventListener("input", () => {
-  searchQuery = searchInput.value.trim().toLowerCase();
+  searchRawQuery = searchInput.value || "";
+  searchQuery = searchRawQuery.trim().toLowerCase();
   renderTracks();
+  void refreshCatalogSearch();
 });
 
 tracksList.addEventListener("click", (event) => {
+  const addCatalogBtn = event.target.closest("[data-add-catalog-track]");
+  if (addCatalogBtn) {
+    const trackId = addCatalogBtn.getAttribute("data-add-catalog-track");
+    if (!trackId) return;
+    void addCatalogTrackToLibrary(trackId);
+    return;
+  }
+
   const trackMain = event.target.closest("[data-play-track]");
   if (trackMain) {
     const trackId = trackMain.getAttribute("data-play-track");

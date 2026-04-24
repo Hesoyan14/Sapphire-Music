@@ -4,6 +4,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote_plus
 from urllib.request import Request, urlopen
@@ -13,7 +14,7 @@ import requests
 import base64
 import tempfile
 
-from flask import Flask, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+from flask import Flask, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
 from mutagen import File as MutagenFile
 from sqlalchemy import event, func
 from sqlalchemy.engine import Engine
@@ -632,6 +633,26 @@ def infer_audio_mime(filename: str) -> str:
     return "audio/mpeg"
 
 
+def load_audio_bytes(storage_key: str):
+    if not storage_key or not s3_configured():
+        return None
+    try:
+        import boto3
+
+        endpoint = os.environ.get("S3_ENDPOINT") or None
+        client = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=os.environ["S3_ACCESS_KEY"],
+            aws_secret_access_key=os.environ["S3_SECRET_KEY"],
+            region_name=os.environ.get("S3_REGION") or "auto",
+        )
+        obj = client.get_object(Bucket=os.environ["S3_BUCKET"], Key=storage_key)
+        return obj["Body"].read()
+    except Exception:
+        return None
+
+
 def get_current_user_id():
     if not session.get("logged_in"):
         return None
@@ -988,7 +1009,7 @@ def tracks():
     rows = user_track_query(uid).order_by(Track.original_filename.asc()).all()
     changed = False
     cover_attempts = 0
-    max_cover_attempts = 1
+    max_cover_attempts = 0
 
     for track in rows:
         title = str(track.title or Path(track.original_filename or "track").stem).strip()
@@ -1099,7 +1120,8 @@ def upload():
             pass
 
     track_id = uuid.uuid4().hex
-    cover = local_cover or fetch_cover_url(metadata["artist"], metadata["title"])
+    # Avoid external cover API calls during upload for faster response.
+    cover = local_cover
     track = Track(
         id=track_id,
         owner_id=uid,
@@ -1338,6 +1360,17 @@ def audio(filename):
     url = presigned_audio_url(track.storage_key)
     if url:
         return redirect(url)
+
+    if track.storage_key:
+        data = load_audio_bytes(track.storage_key)
+        if data is not None:
+            return send_file(
+                BytesIO(data),
+                mimetype=infer_audio_mime(safe_name),
+                as_attachment=False,
+                download_name=safe_name,
+                conditional=True,
+            )
 
     audio_path = UPLOAD_DIR / safe_name
     if not audio_path.exists():
